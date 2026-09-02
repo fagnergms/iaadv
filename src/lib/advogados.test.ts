@@ -6,6 +6,7 @@ import {
   listAdvogados,
   setAdvogadoAtivo,
   NaoAutorizadoError,
+  EmailDuplicadoError,
 } from "./advogados";
 
 describe("advogados (admin) service", () => {
@@ -36,6 +37,20 @@ describe("advogados (admin) service", () => {
         senha: "senha1234",
       })
     ).rejects.toBeInstanceOf(NaoAutorizadoError);
+  });
+
+  it("rejeita e-mail já cadastrado com EmailDuplicadoError", async () => {
+    const admin = await makeAdvogado({ isAdmin: true });
+    const input = {
+      nome: "Dr. Fulano",
+      email: "fulano@escritorio.com",
+      senha: "senha1234",
+    };
+    await createAdvogado(admin.id, input);
+
+    await expect(
+      createAdvogado(admin.id, { ...input, nome: "Outro Nome" })
+    ).rejects.toBeInstanceOf(EmailDuplicadoError);
   });
 
   it("admin desativado perde os poderes de admin", async () => {
