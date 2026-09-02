@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { hashPassword } from "./password";
 import { advogadoSchema, type AdvogadoInput } from "./validation";
@@ -6,6 +7,13 @@ export class NaoAutorizadoError extends Error {
   constructor() {
     super("Apenas administradores podem gerenciar contas de advogados.");
     this.name = "NaoAutorizadoError";
+  }
+}
+
+export class EmailDuplicadoError extends Error {
+  constructor() {
+    super("Já existe um advogado cadastrado com esse e-mail.");
+    this.name = "EmailDuplicadoError";
   }
 }
 
@@ -19,14 +27,21 @@ export async function createAdvogado(actorId: string, input: AdvogadoInput) {
   const data = advogadoSchema.parse(input);
   const senhaHash = await hashPassword(data.senha);
 
-  return prisma.advogado.create({
-    data: {
-      nome: data.nome,
-      email: data.email,
-      senhaHash,
-      isAdmin: data.isAdmin ?? false,
-    },
-  });
+  try {
+    return await prisma.advogado.create({
+      data: {
+        nome: data.nome,
+        email: data.email,
+        senhaHash,
+        isAdmin: data.isAdmin ?? false,
+      },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      throw new EmailDuplicadoError();
+    }
+    throw err;
+  }
 }
 
 export async function listAdvogados(actorId: string) {
