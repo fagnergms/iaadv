@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { prisma } from "./db";
 import { resetDb, makeAdvogado } from "./testHelpers";
 import { hashPassword } from "./password";
-import { verifyCredentials } from "./credentials";
+import { verifyCredentials, getAdvogadoAtivoById } from "./credentials";
 
 describe("verifyCredentials", () => {
   beforeEach(async () => {
@@ -38,5 +39,35 @@ describe("verifyCredentials", () => {
     expect(
       await verifyCredentials("inativo@escritorio.com", "senha12345678")
     ).toBeNull();
+  });
+});
+
+describe("getAdvogadoAtivoById", () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it("retorna o advogado ativo com o isAdmin atual", async () => {
+    const advogado = await makeAdvogado({ isAdmin: true });
+
+    const result = await getAdvogadoAtivoById(advogado.id);
+    expect(result?.id).toBe(advogado.id);
+    expect(result?.isAdmin).toBe(true);
+  });
+
+  it("retorna null depois que o advogado é desativado", async () => {
+    const advogado = await makeAdvogado({ ativo: true });
+    expect(await getAdvogadoAtivoById(advogado.id)).not.toBeNull();
+
+    await prisma.advogado.update({
+      where: { id: advogado.id },
+      data: { ativo: false },
+    });
+
+    expect(await getAdvogadoAtivoById(advogado.id)).toBeNull();
+  });
+
+  it("retorna null para um id inexistente", async () => {
+    expect(await getAdvogadoAtivoById(crypto.randomUUID())).toBeNull();
   });
 });
