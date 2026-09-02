@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { isValidCPF, isValidE164, clienteSchema, advogadoSchema } from "./validation";
+import {
+  isValidCPF,
+  isValidE164,
+  clienteSchema,
+  advogadoSchema,
+  processoSchema,
+} from "./validation";
 
 describe("isValidCPF", () => {
   it("accepts a valid CPF", () => {
@@ -42,6 +48,54 @@ describe("clienteSchema", () => {
       cpf: "111.444.777-35",
     });
     expect(result.success).toBe(false);
+  });
+
+  it("normalizes a punctuated CPF to 11 digits", () => {
+    const result = clienteSchema.parse({
+      nome: "Maria Silva",
+      telefone: "+5511999990000",
+      cpf: " 111.444.777-35 ",
+    });
+    expect(result.cpf).toBe("11144477735");
+  });
+
+  it("still rejects an invalid CPF before normalizing", () => {
+    const result = clienteSchema.safeParse({
+      nome: "Maria Silva",
+      telefone: "+5511999990000",
+      cpf: "111.444.777-36",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("processoSchema", () => {
+  it("accepts valid input", () => {
+    const result = processoSchema.safeParse({
+      numeroProcesso: "0001234-56.2026.8.26.0100",
+      descricao: "Ação de cobrança",
+      statusAtual: "Aguardando distribuição",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects whitespace-only fields", () => {
+    const result = processoSchema.safeParse({
+      numeroProcesso: "   ",
+      descricao: "   ",
+      statusAtual: "   ",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("trims the stored values", () => {
+    const result = processoSchema.parse({
+      numeroProcesso: "  0001234-56.2026.8.26.0100  ",
+      descricao: "  Ação de cobrança  ",
+      statusAtual: "  Aguardando distribuição  ",
+    });
+    expect(result.numeroProcesso).toBe("0001234-56.2026.8.26.0100");
+    expect(result.descricao).toBe("Ação de cobrança");
   });
 });
 
