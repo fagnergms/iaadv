@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { resetDb, makeAdvogado } from "./testHelpers";
 import { createCliente } from "./clientes";
-import { createProcesso } from "./processos";
+import { createProcesso, getProcessoForAdvogado } from "./processos";
 import {
   addHistoricoStatus,
   listHistoricoForProcesso,
@@ -39,6 +39,9 @@ describe("historico service", () => {
 
     const historico = await listHistoricoForProcesso(advogado.id, processo.id);
     expect(historico).toHaveLength(1);
+
+    const atualizado = await getProcessoForAdvogado(advogado.id, processo.id);
+    expect(atualizado?.statusAtual).toBe("Audiência marcada para 10/10");
   });
 
   it("rejeita adicionar histórico em processo de outro advogado", async () => {
