@@ -6,6 +6,13 @@ import { auth } from "@/lib/auth";
 import { createProcesso, updateProcesso, ClienteNaoEncontradoError } from "@/lib/processos";
 import { addHistoricoStatus } from "@/lib/historico";
 
+function isValidationError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "issues" in err;
+}
+
+const DADOS_INVALIDOS =
+  "Dados inválidos. Confira número do processo, descrição e status.";
+
 export async function createProcessoAction(
   clienteId: string,
   _prevState: { error?: string } | undefined,
@@ -24,6 +31,7 @@ export async function createProcessoAction(
     redirect(`/processos/${processo.id}`);
   } catch (err) {
     if (err instanceof ClienteNaoEncontradoError) return { error: err.message };
+    if (isValidationError(err)) return { error: DADOS_INVALIDOS };
     throw err;
   }
 }
@@ -37,15 +45,21 @@ export async function updateProcessoAction(
   if (!session?.user) redirect("/login");
 
   const situacao = formData.get("situacao") === "encerrado" ? "encerrado" : "ativo";
-  const result = await updateProcesso(session.user.id, processoId, {
-    numeroProcesso: String(formData.get("numeroProcesso") ?? ""),
-    descricao: String(formData.get("descricao") ?? ""),
-    situacao,
-  });
-  if (!result) return { error: "Processo não encontrado." };
 
-  revalidatePath(`/processos/${processoId}`);
-  redirect(`/processos/${processoId}`);
+  try {
+    const result = await updateProcesso(session.user.id, processoId, {
+      numeroProcesso: String(formData.get("numeroProcesso") ?? ""),
+      descricao: String(formData.get("descricao") ?? ""),
+      situacao,
+    });
+    if (!result) return { error: "Processo não encontrado." };
+
+    revalidatePath(`/processos/${processoId}`);
+    redirect(`/processos/${processoId}`);
+  } catch (err) {
+    if (isValidationError(err)) return { error: DADOS_INVALIDOS };
+    throw err;
+  }
 }
 
 export async function addHistoricoAction(
