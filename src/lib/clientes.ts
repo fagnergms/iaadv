@@ -21,9 +21,17 @@ export async function createCliente(advogadoId: string, input: ClienteInput) {
   }
 }
 
-export async function listClientesByAdvogado(advogadoId: string) {
+export async function listClientesByAdvogado(
+  advogadoId: string,
+  searchNome?: string
+) {
+  const nome = searchNome?.trim();
+
   return prisma.cliente.findMany({
-    where: { advogadoId },
+    where: {
+      advogadoId,
+      ...(nome ? { nome: { contains: nome, mode: "insensitive" as const } } : {}),
+    },
     orderBy: { nome: "asc" },
   });
 }
