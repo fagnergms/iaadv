@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Advogado {
+  id        String   @id @default(uuid())
+  nome      String
+  email     String   @unique
+  senhaHash String   @map("senha_hash")
+  isAdmin   Boolean  @default(false) @map("is_admin")
+  ativo     Boolean  @default(true)
+  criadoEm  DateTime @default(now()) @map("criado_em")
+
+  clientes  Cliente[]
+  processos Processo[]
+
+  @@map("advogados")
+}
+
+model Cliente {
+  id         String   @id @default(uuid())
+  advogadoId String   @map("advogado_id")
+  advogado   Advogado @relation(fields: [advogadoId], references: [id])
+  nome       String
+  telefone   String   @unique
+  cpf        String
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  processos  Processo[]
+
+  @@map("clientes")
+}
+
+enum SituacaoProcesso {
+  ativo
+  encerrado
+}
+
+model Processo {
+  id             String            @id @default(uuid())
+  clienteId      String            @map("cliente_id")
+  cliente        Cliente           @relation(fields: [clienteId], references: [id])
+  advogadoId     String            @map("advogado_id")
+  advogado       Advogado          @relation(fields: [advogadoId], references: [id])
+  numeroProcesso String            @map("numero_processo")
+  descricao      String
+  statusAtual    String            @map("status_atual")
+  situacao       SituacaoProcesso  @default(ativo)
+  criadoEm       DateTime          @default(now()) @map("criado_em")
+  atualizadoEm   DateTime          @updatedAt @map("atualizado_em")
+
+  historico      HistoricoStatus[]
+
+  @@map("processos")
+}
+
+model HistoricoStatus {
+  id         String   @id @default(uuid())
+  processoId String   @map("processo_id")
+  processo   Processo @relation(fields: [processoId], references: [id])
+  texto      String
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  @@map("historico_status")
+}
