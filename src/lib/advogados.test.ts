@@ -38,6 +38,21 @@ describe("advogados (admin) service", () => {
     ).rejects.toBeInstanceOf(NaoAutorizadoError);
   });
 
+  it("admin desativado perde os poderes de admin", async () => {
+    const adminInativo = await makeAdvogado({ isAdmin: true, ativo: false });
+
+    await expect(
+      createAdvogado(adminInativo.id, {
+        nome: "Dr. Fulano",
+        email: "fulano@escritorio.com",
+        senha: "senha1234",
+      })
+    ).rejects.toBeInstanceOf(NaoAutorizadoError);
+    await expect(listAdvogados(adminInativo.id)).rejects.toBeInstanceOf(
+      NaoAutorizadoError
+    );
+  });
+
   it("não-admin não consegue listar advogados", async () => {
     const naoAdmin = await makeAdvogado({ isAdmin: false });
     await expect(listAdvogados(naoAdmin.id)).rejects.toBeInstanceOf(NaoAutorizadoError);
