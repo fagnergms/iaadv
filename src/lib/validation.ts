@@ -46,3 +46,11 @@ export const advogadoSchema = z.object({
 });
 
 export type AdvogadoInput = z.infer<typeof advogadoSchema>;
+
+export const processoSchema = z.object({
+  numeroProcesso: z.string().trim().min(1, "Número do processo é obrigatório"),
+  descricao: z.string().trim().min(1, "Descrição é obrigatória"),
+  statusAtual: z.string().trim().min(1, "Status atual é obrigatório"),
+});
+
+export type ProcessoInput = z.infer<typeof processoSchema>;
