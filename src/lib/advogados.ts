@@ -11,7 +11,7 @@ export class NaoAutorizadoError extends Error {
 
 async function assertIsAdmin(actorId: string) {
   const actor = await prisma.advogado.findUnique({ where: { id: actorId } });
-  if (!actor?.isAdmin) throw new NaoAutorizadoError();
+  if (!actor?.isAdmin || !actor.ativo) throw new NaoAutorizadoError();
 }
 
 export async function createAdvogado(actorId: string, input: AdvogadoInput) {
