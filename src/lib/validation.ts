@@ -33,7 +33,13 @@ export const clienteSchema = z.object({
     .string()
     .trim()
     .refine(isValidE164, "Telefone deve estar no formato internacional, ex: +5511999999999"),
-  cpf: z.string().trim().refine(isValidCPF, "CPF inválido"),
+  cpf: z
+    .string()
+    .trim()
+    .refine(isValidCPF, "CPF inválido")
+    // Normaliza para 11 dígitos só depois de validar, para que a Fase 2 consiga
+    // casar clientes por CPF sem depender da formatação digitada.
+    .transform((cpf) => cpf.replace(/\D/g, "")),
 });
 
 export type ClienteInput = z.infer<typeof clienteSchema>;
