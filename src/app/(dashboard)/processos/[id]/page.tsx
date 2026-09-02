@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getProcessoForAdvogado } from "@/lib/processos";
@@ -23,6 +24,7 @@ export default async function ProcessoDetailPage({
       <p>
         Status atual: {processo.statusAtual} ({processo.situacao})
       </p>
+      <Link href={`/processos/${processo.id}/editar`}>Editar processo</Link>
 
       <h2>Adicionar atualização</h2>
       <AddHistoricoForm processoId={processo.id} />
