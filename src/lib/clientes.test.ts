@@ -50,6 +50,38 @@ describe("clientes service", () => {
     expect(clientesA[0].advogadoId).toBe(advogadoA.id);
   });
 
+  it("filtra clientes por nome, sem diferenciar maiúsculas", async () => {
+    const advogado = await makeAdvogado();
+    await createCliente(advogado.id, validInput);
+    await createCliente(advogado.id, {
+      ...validInput,
+      nome: "João Pereira",
+      telefone: "+5511999990002",
+      cpf: "529.982.247-25",
+    });
+
+    const encontrados = await listClientesByAdvogado(advogado.id, "mAr");
+    expect(encontrados).toHaveLength(1);
+    expect(encontrados[0].nome).toBe("Maria Silva");
+
+    expect(await listClientesByAdvogado(advogado.id)).toHaveLength(2);
+    expect(await listClientesByAdvogado(advogado.id, "   ")).toHaveLength(2);
+  });
+
+  it("a busca por nome continua restrita ao advogado logado", async () => {
+    const advogadoA = await makeAdvogado();
+    const advogadoB = await makeAdvogado();
+    await createCliente(advogadoA.id, validInput);
+    await createCliente(advogadoB.id, {
+      ...validInput,
+      telefone: "+5511999990003",
+    });
+
+    const encontrados = await listClientesByAdvogado(advogadoB.id, "maria");
+    expect(encontrados).toHaveLength(1);
+    expect(encontrados[0].advogadoId).toBe(advogadoB.id);
+  });
+
   it("não permite um advogado acessar cliente de outro", async () => {
     const advogadoA = await makeAdvogado();
     const advogadoB = await makeAdvogado();
