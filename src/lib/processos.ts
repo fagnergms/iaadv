@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { getClienteForAdvogado } from "./clientes";
+import { processoSchema, type ProcessoInput } from "./validation";
 
 export class ClienteNaoEncontradoError extends Error {
   constructor() {
@@ -8,17 +9,16 @@ export class ClienteNaoEncontradoError extends Error {
   }
 }
 
-export interface ProcessoInput {
-  numeroProcesso: string;
-  descricao: string;
-  statusAtual: string;
-}
+export type { ProcessoInput };
+
+const processoUpdateSchema = processoSchema.partial();
 
 export async function createProcesso(
   advogadoId: string,
   clienteId: string,
   input: ProcessoInput
 ) {
+  const data = processoSchema.parse(input);
   const cliente = await getClienteForAdvogado(advogadoId, clienteId);
   if (!cliente) throw new ClienteNaoEncontradoError();
 
@@ -26,9 +26,9 @@ export async function createProcesso(
     data: {
       clienteId,
       advogadoId,
-      numeroProcesso: input.numeroProcesso,
-      descricao: input.descricao,
-      statusAtual: input.statusAtual,
+      numeroProcesso: data.numeroProcesso,
+      descricao: data.descricao,
+      statusAtual: data.statusAtual,
     },
   });
 }
@@ -52,8 +52,16 @@ export async function updateProcesso(
   processoId: string,
   input: Partial<ProcessoInput> & { situacao?: "ativo" | "encerrado" }
 ) {
+  const { situacao, ...campos } = input;
+  // Só valida os campos realmente enviados: uma atualização apenas de
+  // `situacao` é legítima e não deve exigir os demais campos.
+  const data = processoUpdateSchema.parse(campos);
+
   const existing = await getProcessoForAdvogado(advogadoId, processoId);
   if (!existing) return null;
 
-  return prisma.processo.update({ where: { id: processoId }, data: input });
+  return prisma.processo.update({
+    where: { id: processoId },
+    data: { ...data, ...(situacao ? { situacao } : {}) },
+  });
 }
