@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { prisma } from "./db";
 import { resetDb, makeAdvogado } from "./testHelpers";
 import { createCliente } from "./clientes";
 import {
@@ -44,6 +45,37 @@ describe("processos service", () => {
     await expect(
       createProcesso(advogadoB.id, cliente.id, processoInput)
     ).rejects.toBeInstanceOf(ClienteNaoEncontradoError);
+  });
+
+  it("rejeita numeroProcesso ou descricao em branco", async () => {
+    const advogado = await makeAdvogado();
+    const cliente = await createCliente(advogado.id, clienteInput);
+
+    await expect(
+      createProcesso(advogado.id, cliente.id, {
+        ...processoInput,
+        numeroProcesso: "   ",
+      })
+    ).rejects.toThrow();
+
+    await expect(
+      createProcesso(advogado.id, cliente.id, {
+        ...processoInput,
+        descricao: "",
+      })
+    ).rejects.toThrow();
+
+    expect(await prisma.processo.count()).toBe(0);
+  });
+
+  it("rejeita atualizar um processo com descricao em branco", async () => {
+    const advogado = await makeAdvogado();
+    const cliente = await createCliente(advogado.id, clienteInput);
+    const processo = await createProcesso(advogado.id, cliente.id, processoInput);
+
+    await expect(
+      updateProcesso(advogado.id, processo.id, { descricao: "   " })
+    ).rejects.toThrow();
   });
 
   it("lista processos apenas para o advogado dono do cliente", async () => {
