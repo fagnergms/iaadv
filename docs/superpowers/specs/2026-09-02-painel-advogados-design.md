@@ -54,6 +54,7 @@ Advogado
   email         string, único
   senha_hash    string
   is_admin      boolean, default false
+  ativo         boolean, default true
   criado_em     timestamp
 
 Cliente
@@ -125,7 +126,8 @@ inicial (não há cadastro público).
    histórico de status (isso atualiza `status_atual` e cria uma linha em
    `HistoricoStatus`).
 6. **Gerenciar advogados** (somente admin) — criar conta (nome, e-mail,
-   senha inicial), ativar/desativar.
+   senha inicial), ativar/desativar (usa o campo `Advogado.ativo`; login é
+   negado se `ativo = false`).
 
 ## Validações e tratamento de erros
 
