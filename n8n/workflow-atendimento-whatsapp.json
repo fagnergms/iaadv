@@ -1,0 +1,489 @@
+{
+  "name": "Atendimento WhatsApp - Escritorio",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Antes de ativar este workflow\n\n1. Configure a credencial **Postgres** nos 8 nodes que usam banco (mesmo banco do painel Next.js).\n2. Configure a credencial **Google Gemini (PaLM) API** no node \"Google Gemini Chat Model\".\n3. Nos dois nodes **\"Enviar Resposta - ...\"** e **\"Enviar Resposta - Nao Encontrado\"/\"Enviar Resposta - Verificacao\"/\"Enviar Resposta - IA\"**, troque a URL e a apikey da Evolution API pelos valores reais (procure por SUBSTITUA).\n4. Confira o node \"Extrair e Filtrar\" contra o payload real da sua instancia da Evolution API (mande uma mensagem de teste e olhe a execucao).\n5. So depois disso, ative o workflow (toggle no canto superior direito) e configure o webhook da Evolution API apontando para a URL do node \"Webhook - Evolution API\".\n\nVeja o guia completo em docs/superpowers/guides/2026-09-03-fase2-n8n-setup.md",
+        "height": 380,
+        "width": 460
+      },
+      "id": "note-intro",
+      "name": "Sticky Note - Leia Antes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-420, -420]
+    },
+    {
+      "parameters": {
+        "content": "## Seguranca (nao mexa sem entender)\n\nO node \"Buscar Processos (Tool)\" usa `{{ $('Buscar Cliente').item.json.id }}` como cliente_id - esse valor vem do resultado da busca por telefone, nunca de um campo que a IA preenche. Isso impede a IA de consultar dados de outro cliente. Ao editar esse node, mantenha o cliente_id como expressao fixa, nunca como parametro \"preenchido pelo modelo\".",
+        "height": 260,
+        "width": 380
+      },
+      "id": "note-security",
+      "name": "Sticky Note - Seguranca",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-in",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-1",
+      "name": "Webhook - Evolution API",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 0],
+      "webhookId": "whatsapp-in-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Confira este parsing contra o payload real da sua Evolution API\n// (mande uma mensagem de teste e olhe a execucao no n8n).\nconst body = $input.first().json;\nconst data = body.data;\n\nif (!data || !data.key || data.key.fromMe) {\n  // mensagem enviada pelo proprio bot, ou payload sem o formato esperado: ignora\n  return [];\n}\n\nconst texto =\n  data.message?.conversation ??\n  data.message?.extendedTextMessage?.text ??\n  \"\";\n\nif (!texto) {\n  // mensagem sem texto (audio, imagem, etc.) - por enquanto o bot so trata texto\n  return [];\n}\n\nconst telefone = \"+\" + data.key.remoteJid.split(\"@\")[0];\n\nreturn [{ json: { telefone, texto } }];"
+      },
+      "id": "code-extrair",
+      "name": "Extrair e Filtrar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [20, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, nome, cpf, advogado_id FROM clientes WHERE telefone = $1",
+        "options": {
+          "queryReplacement": "={{ [$json.telefone] }}"
+        }
+      },
+      "id": "pg-buscar-cliente",
+      "name": "Buscar Cliente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "alwaysOutputData": true,
+      "position": [240, 0],
+      "credentials": {
+        "postgres": {
+          "id": "SUBSTITUA",
+          "name": "Postgres - Painel Advogados"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-cliente-existe",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-cliente-encontrado",
+      "name": "Cliente Encontrado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    telefone: $('Extrair e Filtrar').item.json.telefone,\n    mensagem: \"Nao encontramos seu cadastro em nosso sistema. Entre em contato com o escritorio.\"\n  }\n}];"
+      },
+      "id": "code-nao-encontrado",
+      "name": "Montar Mensagem - Nao Encontrado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://SUBSTITUA-URL-EVOLUTION-API/message/sendText/escritorio",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "SUBSTITUA-EVOLUTION-API-KEY" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.telefone.replace(\"+\", \"\"), text: $json.mensagem }) }}",
+        "options": {}
+      },
+      "id": "http-nao-encontrado",
+      "name": "Enviar Resposta - Nao Encontrado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 140]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT verificado_em, tentativas_falhas, ultima_mensagem_em FROM conversas WHERE telefone = $1",
+        "options": {
+          "queryReplacement": "={{ [$('Extrair e Filtrar').item.json.telefone] }}"
+        }
+      },
+      "id": "pg-buscar-conversa",
+      "name": "Buscar Conversa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "alwaysOutputData": true,
+      "position": [680, -100],
+      "credentials": {
+        "postgres": {
+          "id": "SUBSTITUA",
+          "name": "Postgres - Painel Advogados"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cliente = $('Buscar Cliente').item.json;\nconst conversa = $input.first().json; // objeto vazio {} se nao existir (alwaysOutputData)\nconst conversaExiste = !!conversa.ultima_mensagem_em;\n\nconst agora = new Date();\nconst sessaoValida = !!(\n  conversaExiste &&\n  conversa.verificado_em &&\n  (agora.getTime() - new Date(conversa.ultima_mensagem_em).getTime()) < 24 * 60 * 60 * 1000\n);\n\nreturn [{\n  json: {\n    telefone: $('Extrair e Filtrar').item.json.telefone,\n    texto: $('Extrair e Filtrar').item.json.texto,\n    clienteId: cliente.id,\n    clienteCpf: cliente.cpf,\n    advogadoId: cliente.advogado_id,\n    conversaExiste,\n    tentativasFalhas: conversa.tentativas_falhas ?? 0,\n    sessaoValida\n  }\n}];"
+      },
+      "id": "code-calcular-sessao",
+      "name": "Calcular Sessao",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, -100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversas (id, telefone, ultima_mensagem_em, criado_em)\nVALUES (gen_random_uuid(), $1, now(), now())\nON CONFLICT (telefone) DO UPDATE SET ultima_mensagem_em = now()",
+        "options": {
+          "queryReplacement": "={{ [$json.telefone] }}"
+        }
+      },
+      "id": "pg-upsert-conversa",
+      "name": "Upsert Conversa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, -100],
+      "credentials": {
+        "postgres": {
+          "id": "SUBSTITUA",
+          "name": "Postgres - Painel Advogados"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-sessao-valida",
+              "leftValue": "={{ $json.sessaoValida }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-sessao-valida",
+      "name": "Sessao Valida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst digitosRecebidos = (item.texto || \"\").replace(/\\D/g, \"\").slice(-4);\nconst digitosEsperados = (item.clienteCpf || \"\").replace(/\\D/g, \"\").slice(-4);\n\nif (!item.conversaExiste) {\n  return [{\n    json: {\n      ...item,\n      acao: \"pedir_cpf\",\n      mensagem: \"Para sua seguranca, confirme os 4 ultimos digitos do seu CPF antes de continuarmos.\",\n      novoVerificadoEm: null,\n      novasTentativas: 0,\n      motivoEscalonamento: null\n    }\n  }];\n}\n\nconst confirmou = digitosRecebidos.length === 4 && digitosRecebidos === digitosEsperados;\n\nif (confirmou) {\n  return [{\n    json: {\n      ...item,\n      acao: \"confirmado\",\n      mensagem: \"Identidade confirmada! Pode repetir sua pergunta.\",\n      novoVerificadoEm: new Date().toISOString(),\n      novasTentativas: 0,\n      motivoEscalonamento: null\n    }\n  }];\n}\n\nconst novasTentativas = (item.tentativasFalhas || 0) + 1;\n\nif (novasTentativas >= 3) {\n  return [{\n    json: {\n      ...item,\n      acao: \"escalar_falha\",\n      mensagem: \"Nao conseguimos confirmar sua identidade. Um advogado vai entrar em contato.\",\n      motivoEscalonamento: \"falha na verificacao\",\n      novoVerificadoEm: null,\n      novasTentativas\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...item,\n    acao: \"tentar_de_novo\",\n    mensagem: \"Nao conferiu. Pode confirmar novamente os 4 ultimos digitos do seu CPF?\",\n    novoVerificadoEm: null,\n    novasTentativas,\n    motivoEscalonamento: null\n  }\n}];"
+      },
+      "id": "code-verificar-cpf",
+      "name": "Verificar CPF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 60]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversas SET verificado_em = $1, tentativas_falhas = $2 WHERE telefone = $3",
+        "options": {
+          "queryReplacement": "={{ [$json.novoVerificadoEm, $json.novasTentativas, $json.telefone] }}"
+        }
+      },
+      "id": "pg-atualizar-conversa-verificacao",
+      "name": "Atualizar Conversa - Verificacao",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 60],
+      "credentials": {
+        "postgres": {
+          "id": "SUBSTITUA",
+          "name": "Postgres - Painel Advogados"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-escalar-falha",
+              "leftValue": "={{ $json.acao }}",
+              "rightValue": "escalar_falha",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-escalar-falha",
+      "name": "Precisa Escalar - Falha Verificacao?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 60]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO escalonamentos (id, cliente_id, advogado_id, telefone, mensagem_cliente, motivo, criado_em)\nVALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now())",
+        "options": {
+          "queryReplacement": "={{ [$json.clienteId, $json.advogadoId, $json.telefone, $json.texto, $json.motivoEscalonamento] }}"
+        }
+      },
+      "id": "pg-escalonamento-falha",
+      "name": "Criar Escalonamento - Falha Verificacao",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2220, -60],
+      "credentials": {
+        "postgres": {
+          "id": "SUBSTITUA",
+          "name": "Postgres - Painel Advogados"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://SUBSTITUA-URL-EVOLUTION-API/message/sendText/escritorio",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "SUBSTITUA-EVOLUTION-API-KEY" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.telefone.replace(\"+\", \"\"), text: $json.mensagem }) }}",
+        "options": {}
+      },
+      "id": "http-verificacao",
+      "name": "Enviar Resposta - Verificacao",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 60]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto }}",
+        "options": {
+          "systemMessage": "Voce e um assistente de um escritorio de advocacia, respondendo pelo WhatsApp a clientes que perguntam sobre o andamento de seus processos.\n\nRegras rigidas:\n- Responda SOMENTE com base no que a ferramenta \"Buscar Processos (Tool)\" retornar. Nunca invente numero de processo, status, prazo ou qualquer informacao juridica.\n- Se o cliente tiver mais de um processo, pergunte qual processo antes de responder sobre status.\n- Se a pergunta nao for sobre status de processo, se a ferramenta nao retornar nada relevante, ou se o cliente pedir explicitamente para falar com um advogado, termine sua resposta com a tag [ESCALAR] em uma linha separada, seguida do motivo em poucas palavras. Nao tente adivinhar informacao juridica.\n- Seja breve e educado, em portugues do Brasil."
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1560, -260]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash"
+      },
+      "id": "ai-gemini-model",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [1440, -60],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SUBSTITUA",
+          "name": "Gemini API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT numero_processo, descricao, status_atual, situacao FROM processos WHERE cliente_id = $1",
+        "options": {
+          "queryReplacement": "={{ [$('Buscar Cliente').item.json.id] }}"
+        },
+        "toolDescription": "Busca a lista de processos (numero, descricao, status atual e situacao) do cliente que ja foi identificado nesta conversa. Nao recebe parametros do modelo - o cliente ja esta fixo pela conversa verificada."
+      },
+      "id": "ai-tool-processos",
+      "name": "Buscar Processos (Tool)",
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [1680, -60],
+      "credentials": {
+        "postgres": {
+          "id": "SUBSTITUA",
+          "name": "Postgres - Painel Advogados"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst textoIA = item.output || item.text || \"\";\n\nconst precisaEscalar = /\\[ESCALAR\\]/i.test(textoIA);\nconst mensagem = textoIA.replace(/\\[ESCALAR\\][\\s\\S]*/i, \"\").trim();\nconst motivoMatch = textoIA.match(/\\[ESCALAR\\]\\s*(.*)/i);\nconst motivoEscalonamento = motivoMatch ? motivoMatch[1].trim() : \"fora do escopo\";\n\nreturn [{\n  json: {\n    telefone: $('Calcular Sessao').item.json.telefone,\n    texto: $('Calcular Sessao').item.json.texto,\n    clienteId: $('Calcular Sessao').item.json.clienteId,\n    advogadoId: $('Calcular Sessao').item.json.advogadoId,\n    mensagem: mensagem || \"Vou encaminhar sua mensagem para um advogado.\",\n    precisaEscalar,\n    motivoEscalonamento\n  }\n}];"
+      },
+      "id": "code-processar-resposta-ia",
+      "name": "Processar Resposta IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, -260]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-escalar-ia",
+              "leftValue": "={{ $json.precisaEscalar }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-escalar-ia",
+      "name": "Precisa Escalar - IA?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, -260]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO escalonamentos (id, cliente_id, advogado_id, telefone, mensagem_cliente, motivo, criado_em)\nVALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now())",
+        "options": {
+          "queryReplacement": "={{ [$json.clienteId, $json.advogadoId, $json.telefone, $json.texto, $json.motivoEscalonamento] }}"
+        }
+      },
+      "id": "pg-escalonamento-ia",
+      "name": "Criar Escalonamento - IA",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2220, -380],
+      "credentials": {
+        "postgres": {
+          "id": "SUBSTITUA",
+          "name": "Postgres - Painel Advogados"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://SUBSTITUA-URL-EVOLUTION-API/message/sendText/escritorio",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "SUBSTITUA-EVOLUTION-API-KEY" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.telefone.replace(\"+\", \"\"), text: $json.mensagem }) }}",
+        "options": {}
+      },
+      "id": "http-ia",
+      "name": "Enviar Resposta - IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, -260]
+    }
+  ],
+  "connections": {
+    "Webhook - Evolution API": {
+      "main": [[{ "node": "Extrair e Filtrar", "type": "main", "index": 0 }]]
+    },
+    "Extrair e Filtrar": {
+      "main": [[{ "node": "Buscar Cliente", "type": "main", "index": 0 }]]
+    },
+    "Buscar Cliente": {
+      "main": [[{ "node": "Cliente Encontrado?", "type": "main", "index": 0 }]]
+    },
+    "Cliente Encontrado?": {
+      "main": [
+        [{ "node": "Buscar Conversa", "type": "main", "index": 0 }],
+        [{ "node": "Montar Mensagem - Nao Encontrado", "type": "main", "index": 0 }]
+      ]
+    },
+    "Montar Mensagem - Nao Encontrado": {
+      "main": [[{ "node": "Enviar Resposta - Nao Encontrado", "type": "main", "index": 0 }]]
+    },
+    "Buscar Conversa": {
+      "main": [[{ "node": "Calcular Sessao", "type": "main", "index": 0 }]]
+    },
+    "Calcular Sessao": {
+      "main": [[{ "node": "Upsert Conversa", "type": "main", "index": 0 }]]
+    },
+    "Upsert Conversa": {
+      "main": [[{ "node": "Sessao Valida?", "type": "main", "index": 0 }]]
+    },
+    "Sessao Valida?": {
+      "main": [
+        [{ "node": "AI Agent", "type": "main", "index": 0 }],
+        [{ "node": "Verificar CPF", "type": "main", "index": 0 }]
+      ]
+    },
+    "Verificar CPF": {
+      "main": [[{ "node": "Atualizar Conversa - Verificacao", "type": "main", "index": 0 }]]
+    },
+    "Atualizar Conversa - Verificacao": {
+      "main": [[{ "node": "Precisa Escalar - Falha Verificacao?", "type": "main", "index": 0 }]]
+    },
+    "Precisa Escalar - Falha Verificacao?": {
+      "main": [
+        [{ "node": "Criar Escalonamento - Falha Verificacao", "type": "main", "index": 0 }],
+        [{ "node": "Enviar Resposta - Verificacao", "type": "main", "index": 0 }]
+      ]
+    },
+    "Criar Escalonamento - Falha Verificacao": {
+      "main": [[{ "node": "Enviar Resposta - Verificacao", "type": "main", "index": 0 }]]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [[{ "node": "AI Agent", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Buscar Processos (Tool)": {
+      "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]]
+    },
+    "AI Agent": {
+      "main": [[{ "node": "Processar Resposta IA", "type": "main", "index": 0 }]]
+    },
+    "Processar Resposta IA": {
+      "main": [[{ "node": "Precisa Escalar - IA?", "type": "main", "index": 0 }]]
+    },
+    "Precisa Escalar - IA?": {
+      "main": [
+        [{ "node": "Criar Escalonamento - IA", "type": "main", "index": 0 }],
+        [{ "node": "Enviar Resposta - IA", "type": "main", "index": 0 }]
+      ]
+    },
+    "Criar Escalonamento - IA": {
+      "main": [[{ "node": "Enviar Resposta - IA", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "iaparaadvogados-fase2"
+  }
+}
