@@ -16,8 +16,9 @@ model Advogado {
   ativo     Boolean  @default(true)
   criadoEm  DateTime @default(now()) @map("criado_em")
 
-  clientes  Cliente[]
-  processos Processo[]
+  clientes       Cliente[]
+  processos      Processo[]
+  escalonamentos Escalonamento[]
 
   @@map("advogados")
 }
@@ -31,7 +32,8 @@ model Cliente {
   cpf        String
   criadoEm   DateTime @default(now()) @map("criado_em")
 
-  processos  Processo[]
+  processos      Processo[]
+  escalonamentos Escalonamento[]
 
   @@map("clientes")
 }
@@ -67,4 +69,30 @@ model HistoricoStatus {
   criadoEm   DateTime @default(now()) @map("criado_em")
 
   @@map("historico_status")
+}
+
+model Conversa {
+  id               String    @id @default(uuid())
+  telefone         String    @unique
+  verificadoEm     DateTime? @map("verificado_em")
+  tentativasFalhas Int       @default(0) @map("tentativas_falhas")
+  ultimaMensagemEm DateTime  @map("ultima_mensagem_em")
+  criadoEm         DateTime  @default(now()) @map("criado_em")
+
+  @@map("conversas")
+}
+
+model Escalonamento {
+  id              String    @id @default(uuid())
+  clienteId       String    @map("cliente_id")
+  cliente         Cliente   @relation(fields: [clienteId], references: [id])
+  advogadoId      String    @map("advogado_id")
+  advogado        Advogado  @relation(fields: [advogadoId], references: [id])
+  telefone        String
+  mensagemCliente String    @map("mensagem_cliente")
+  motivo          String?
+  criadoEm        DateTime  @default(now()) @map("criado_em")
+  resolvidoEm     DateTime? @map("resolvido_em")
+
+  @@map("escalonamentos")
 }
