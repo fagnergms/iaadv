@@ -15,6 +15,7 @@ export default async function DashboardLayout({
     <div>
       <nav>
         <Link href="/clientes">Clientes</Link>
+        <Link href="/atendimentos">Atendimentos</Link>
         {session.user.isAdmin && <Link href="/admin/advogados">Advogados</Link>}
         <form action={signOutAction}>
           <button type="submit">Sair</button>
