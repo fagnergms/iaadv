@@ -11,6 +11,30 @@ Pré-requisito: a Fase 1 (Frente A) já precisa estar em produção — este gui
 assume que o Postgres do painel já tem as tabelas `clientes`, `processos`,
 `historico_status`, `conversas` e `escalonamentos`.
 
+**Atalho:** o workflow completo do n8n já vem pronto pra importar em
+[`n8n/workflow-atendimento-whatsapp.json`](../../../n8n/workflow-atendimento-whatsapp.json)
+— veja [`n8n/README.md`](../../../n8n/README.md) pra instruções de import.
+Falta só credenciais/chaves. As seções abaixo continuam valendo como
+referência (o que cada peça faz, de onde vem cada informação, o que a IA
+pode e não pode ver) — vale ler mesmo importando o arquivo pronto.
+
+## O que você vai precisar antes de começar
+
+Lista de tudo que precisa existir para este guia funcionar do início ao
+fim — contas, chaves, onde conseguir cada uma, e quanto custa.
+
+| # | O que | Onde conseguir | Custo |
+|---|---|---|---|
+| 1 | Número de WhatsApp dedicado ao escritório | Um chip pré-pago de qualquer operadora (Vivo, Claro, TIM, etc.), físico ou eSIM — só precisa receber o SMS/ligação de verificação do WhatsApp uma vez | Preço de um chip pré-pago (poucos reais); o WhatsApp em si não cobra nada |
+| 2 | VPS com Coolify | Você já tem — nada novo aqui | Já incluso no que você já paga pelo VPS |
+| 3 | Evolution API | Software livre, você mesmo sobe no seu Coolify (Passo 1 abaixo) | Gratuito (só usa recursos do seu VPS que você já tem) |
+| 4 | n8n | Software livre, você mesmo sobe no seu Coolify (Passo 2 abaixo) | Gratuito (idem) |
+| 5 | Conta Google | [accounts.google.com](https://accounts.google.com) — pode usar uma já existente ou criar uma nova só para o escritório | Gratuita |
+| 6 | Chave da API do Gemini | [aistudio.google.com](https://aistudio.google.com), com a conta Google do item 5 → "Get API key" | Tier gratuito com limite de requisições por minuto/dia (o valor exato muda com frequência — confira em [ai.google.dev/pricing](https://ai.google.dev/pricing) no momento em que for configurar) |
+
+Depois de ter os itens 1, 5 e 6 em mãos, siga os passos abaixo na ordem —
+cada um te dá uma peça que o próximo passo usa.
+
 ## Visão geral do que você vai montar
 
 ```
@@ -75,11 +99,21 @@ Evolution API (envia a resposta de volta pro WhatsApp)
 2. No n8n, adicione uma credencial do tipo "Google Gemini" (ou "Google PaLM
    API", dependendo de como aparece na sua versão do n8n) com essa chave.
 
-## Passo 4 — O workflow no n8n, node a node
+## Passo 4 — O workflow no n8n
 
-Aqui está a lógica completa, na ordem. Os nomes de node abaixo são os tipos
-nativos do n8n — os nomes exatos de campo dentro de cada um podem variar
-levemente por versão.
+**Caminho rápido:** importe
+[`n8n/workflow-atendimento-whatsapp.json`](../../../n8n/workflow-atendimento-whatsapp.json)
+(instruções em [`n8n/README.md`](../../../n8n/README.md)) — ele já tem
+todos os nodes abaixo montados e conectados, faltando só credenciais,
+chaves e a URL da Evolution API. Esse arquivo foi escrito à mão seguindo o
+formato do n8n mas não foi testado num n8n real — os nodes clássicos
+(Webhook, IF, Postgres, Code, HTTP Request) são estáveis e devem importar
+sem problema; os três nodes de IA (AI Agent, modelo do Gemini, tool de
+Postgres) mudam mais entre versões do n8n e são os mais prováveis de
+precisar de um ajuste manual ou recriação.
+
+A seção abaixo explica o que cada node faz e por quê — útil tanto para
+montar do zero quanto para entender/ajustar o arquivo importado.
 
 ### 4.1 — Webhook (trigger)
 
@@ -316,3 +350,10 @@ exatamente a garantia que o painel depende para isolar advogados entre si.
   desde que este guia foi escrito — trate os JSONs acima como o formato
   esperado, não como garantia, e ajuste conforme o que você vir nas
   execuções reais do n8n.
+- O arquivo `n8n/workflow-atendimento-whatsapp.json` foi escrito
+  manualmente com base no formato de exportação do n8n, sem testar um
+  import real — trate-o como um ponto de partida sólido para os nodes
+  clássicos (Webhook, IF, Postgres, Code, HTTP Request) e como referência
+  a ser conferida/ajustada para os três nodes de IA (AI Agent, modelo do
+  Gemini, tool de Postgres), que são a parte do n8n que mais muda de
+  formato entre versões.
