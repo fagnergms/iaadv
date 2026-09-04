@@ -15,7 +15,7 @@
     },
     {
       "parameters": {
-        "content": "## Seguranca (nao mexa sem entender)\n\nO node \"Buscar Processos (Tool)\" usa `{{ $('Buscar Cliente').item.json.id }}` como cliente_id - esse valor vem do resultado da busca por telefone, nunca de um campo que a IA preenche. Isso impede a IA de consultar dados de outro cliente. Ao editar esse node, mantenha o cliente_id como expressao fixa, nunca como parametro \"preenchido pelo modelo\".",
+        "content": "## Seguranca (nao mexa sem entender)\n\nO node \"Buscar Processos (Tool)\" usa `{{ $('Buscar Cliente').first().json.id }}` como cliente_id - esse valor vem do resultado da busca por telefone, nunca de um campo que a IA preenche. Isso impede a IA de consultar dados de outro cliente. Ao editar esse node, mantenha o cliente_id como expressao fixa, nunca como parametro \"preenchido pelo modelo\".",
         "height": 260,
         "width": 380
       },
@@ -94,7 +94,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{\n  json: {\n    telefone: $('Extrair e Filtrar').item.json.telefone,\n    mensagem: \"Nao encontramos seu cadastro em nosso sistema. Entre em contato com o escritorio.\"\n  }\n}];"
+        "jsCode": "return [{\n  json: {\n    telefone: $('Extrair e Filtrar').first().json.telefone,\n    mensagem: \"Nao encontramos seu cadastro em nosso sistema. Entre em contato com o escritorio.\"\n  }\n}];"
       },
       "id": "code-nao-encontrado",
       "name": "Montar Mensagem - Nao Encontrado",
@@ -126,7 +126,7 @@
         "operation": "executeQuery",
         "query": "SELECT verificado_em, tentativas_falhas, ultima_mensagem_em FROM conversas WHERE telefone = $1",
         "options": {
-          "queryReplacement": "={{ [$('Extrair e Filtrar').item.json.telefone] }}"
+          "queryReplacement": "={{ [$('Extrair e Filtrar').first().json.telefone] }}"
         }
       },
       "id": "pg-buscar-conversa",
@@ -144,7 +144,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const cliente = $('Buscar Cliente').item.json;\nconst conversa = $input.first().json; // objeto vazio {} se nao existir (alwaysOutputData)\nconst conversaExiste = !!conversa.ultima_mensagem_em;\n\nconst agora = new Date();\nconst sessaoValida = !!(\n  conversaExiste &&\n  conversa.verificado_em &&\n  (agora.getTime() - new Date(conversa.ultima_mensagem_em).getTime()) < 24 * 60 * 60 * 1000\n);\n\nreturn [{\n  json: {\n    telefone: $('Extrair e Filtrar').item.json.telefone,\n    texto: $('Extrair e Filtrar').item.json.texto,\n    clienteId: cliente.id,\n    clienteCpf: cliente.cpf,\n    advogadoId: cliente.advogado_id,\n    conversaExiste,\n    tentativasFalhas: conversa.tentativas_falhas ?? 0,\n    sessaoValida\n  }\n}];"
+        "jsCode": "const cliente = $('Buscar Cliente').first().json;\nconst conversa = $input.first().json; // objeto vazio {} se nao existir (alwaysOutputData)\nconst conversaExiste = !!conversa.ultima_mensagem_em;\n\nconst agora = new Date();\nconst sessaoValida = !!(\n  conversaExiste &&\n  conversa.verificado_em &&\n  (agora.getTime() - new Date(conversa.ultima_mensagem_em).getTime()) < 24 * 60 * 60 * 1000\n);\n\nreturn [{\n  json: {\n    telefone: $('Extrair e Filtrar').first().json.telefone,\n    texto: $('Extrair e Filtrar').first().json.texto,\n    clienteId: cliente.id,\n    clienteCpf: cliente.cpf,\n    advogadoId: cliente.advogado_id,\n    conversaExiste,\n    tentativasFalhas: conversa.tentativas_falhas ?? 0,\n    sessaoValida\n  }\n}];"
       },
       "id": "code-calcular-sessao",
       "name": "Calcular Sessao",
@@ -320,7 +320,7 @@
         "operation": "executeQuery",
         "query": "SELECT numero_processo, descricao, status_atual, situacao FROM processos WHERE cliente_id = $1",
         "options": {
-          "queryReplacement": "={{ [$('Buscar Cliente').item.json.id] }}"
+          "queryReplacement": "={{ [$('Buscar Cliente').first().json.id] }}"
         },
         "toolDescription": "Busca a lista de processos (numero, descricao, status atual e situacao) do cliente que ja foi identificado nesta conversa. Nao recebe parametros do modelo - o cliente ja esta fixo pela conversa verificada."
       },
@@ -338,7 +338,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json;\nconst textoIA = item.output || item.text || \"\";\n\nconst precisaEscalar = /\\[ESCALAR\\]/i.test(textoIA);\nconst mensagem = textoIA.replace(/\\[ESCALAR\\][\\s\\S]*/i, \"\").trim();\nconst motivoMatch = textoIA.match(/\\[ESCALAR\\]\\s*(.*)/i);\nconst motivoEscalonamento = motivoMatch ? motivoMatch[1].trim() : \"fora do escopo\";\n\nreturn [{\n  json: {\n    telefone: $('Calcular Sessao').item.json.telefone,\n    texto: $('Calcular Sessao').item.json.texto,\n    clienteId: $('Calcular Sessao').item.json.clienteId,\n    advogadoId: $('Calcular Sessao').item.json.advogadoId,\n    mensagem: mensagem || \"Vou encaminhar sua mensagem para um advogado.\",\n    precisaEscalar,\n    motivoEscalonamento\n  }\n}];"
+        "jsCode": "const item = $input.first().json;\nconst textoIA = item.output || item.text || \"\";\n\nconst precisaEscalar = /\\[ESCALAR\\]/i.test(textoIA);\nconst mensagem = textoIA.replace(/\\[ESCALAR\\][\\s\\S]*/i, \"\").trim();\nconst motivoMatch = textoIA.match(/\\[ESCALAR\\]\\s*(.*)/i);\nconst motivoEscalonamento = motivoMatch ? motivoMatch[1].trim() : \"fora do escopo\";\n\nreturn [{\n  json: {\n    telefone: $('Calcular Sessao').first().json.telefone,\n    texto: $('Calcular Sessao').first().json.texto,\n    clienteId: $('Calcular Sessao').first().json.clienteId,\n    advogadoId: $('Calcular Sessao').first().json.advogadoId,\n    mensagem: mensagem || \"Vou encaminhar sua mensagem para um advogado.\",\n    precisaEscalar,\n    motivoEscalonamento\n  }\n}];"
       },
       "id": "code-processar-resposta-ia",
       "name": "Processar Resposta IA",
