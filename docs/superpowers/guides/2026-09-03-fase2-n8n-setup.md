@@ -105,33 +105,56 @@ Evolution API (envia a resposta de volta pro WhatsApp)
 [`n8n/workflow-atendimento-whatsapp.json`](../../../n8n/workflow-atendimento-whatsapp.json)
 (instruções em [`n8n/README.md`](../../../n8n/README.md)) — ele já tem
 todos os nodes abaixo montados e conectados, faltando só credenciais,
-chaves e a URL da Evolution API. Esse arquivo foi escrito à mão seguindo o
-formato do n8n mas não foi testado num n8n real — os nodes clássicos
-(Webhook, IF, Postgres, Code, HTTP Request) são estáveis e devem importar
-sem problema; os três nodes de IA (AI Agent, modelo do Gemini, tool de
-Postgres) mudam mais entre versões do n8n e são os mais prováveis de
-precisar de um ajuste manual ou recriação.
+chaves e a URL da Evolution API. O node "Extrair e Filtrar" (4.3) já foi
+testado contra uma execução real e corrigido — o resto (nodes clássicos:
+Webhook, IF, Postgres, Code, HTTP Request) segue sendo o desenho original,
+não testado ponta a ponta; os três nodes de IA (AI Agent, modelo do
+Gemini, tool de Postgres) mudam mais entre versões do n8n e são os mais
+prováveis de precisar de um ajuste manual ou recriação.
 
 A seção abaixo explica o que cada node faz e por quê — útil tanto para
 montar do zero quanto para entender/ajustar o arquivo importado.
 
 ### 4.1 — Webhook (trigger)
 
-Recebe o POST da Evolution API. O payload típico de uma mensagem recebida
-tem este formato (confira o formato real no seu ambiente — mande uma
-mensagem de teste e olhe a execução no n8n):
+Recebe o POST da Evolution API. **Importante, confirmado contra uma
+execução real:** o n8n embrulha o corpo recebido em `{headers, body,
+params, query, ...}` — o payload da Evolution está em `.body`, não direto
+no item que os outros nodes recebem. O formato real (Evolution API v2,
+evento `messages.upsert`) é:
 
 ```json
 {
-  "event": "messages.upsert",
-  "instance": "escritorio",
-  "data": {
-    "key": { "remoteJid": "5511999999999@s.whatsapp.net", "fromMe": false },
-    "message": { "conversation": "oi, como está meu processo?" },
-    "messageTimestamp": 1234567890
-  }
+  "headers": { "...": "..." },
+  "body": {
+    "event": "messages.upsert",
+    "instance": "escritorio",
+    "data": {
+      "key": {
+        "remoteJid": "5511999999999@s.whatsapp.net",
+        "fromMe": false,
+        "id": "...",
+        "addressingMode": "lid"
+      },
+      "pushName": "Fulano",
+      "message": { "conversation": "oi, como está meu processo?" },
+      "messageType": "conversation",
+      "messageTimestamp": 1234567890
+    },
+    "sender": "5511999999999@s.whatsapp.net",
+    "server_url": "https://evo.paineldev.space",
+    "apikey": "..."
+  },
+  "webhookUrl": "https://.../webhook/whatsapp-in",
+  "executionMode": "production"
 }
 ```
+
+Repare em `"addressingMode": "lid"` — quando presente, o WhatsApp está
+enviando um identificador de privacidade ("Linked ID") em
+`data.key.remoteJid`, **não o telefone real**. O campo `body.sender` (no
+nível de cima, ao lado de `server_url`/`apikey`) é o que a própria
+Evolution já resolve como o número de verdade — é esse que o node 4.3 usa.
 
 ### 4.2 — IF: ignorar mensagens próprias e não-texto
 
@@ -143,19 +166,34 @@ precisa existir. Se não passar, **encerra o workflow sem fazer nada**.
 ### 4.3 — Function/Set: normalizar telefone e extrair texto
 
 ```js
-const telefone = "+" + $json.data.key.remoteJid.split("@")[0];
+const wrapper = $input.first().json;
+const body = wrapper.body;
+const data = body?.data;
+
+if (!data || !data.key || data.key.fromMe) {
+  return [];
+}
+
 const texto =
-  $json.data.message.conversation ??
-  $json.data.message.extendedTextMessage?.text ??
+  data.message?.conversation ??
+  data.message?.extendedTextMessage?.text ??
   "";
-return { telefone, texto };
+
+if (!texto) {
+  return [];
+}
+
+const numeroBruto = body.sender || data.key.remoteJid;
+const telefone = "+" + numeroBruto.split("@")[0];
+
+return [{ json: { telefone, texto } }];
 ```
 
 `telefone` precisa ficar exatamente no mesmo formato E.164 que está
-cadastrado em `clientes.telefone` (com `+`) — se os números que a Evolution
-API manda vierem diferentes disso (ex: com um `9` a mais/a menos, comum em
-números de celular brasileiro dependendo da versão do WhatsApp), você vai
-precisar ajustar essa normalização depois de testar com um número real.
+cadastrado em `clientes.telefone` (com `+`). Isso já foi testado com um
+número real e bateu — se ainda assim os números vierem diferentes do
+esperado no seu caso (ex: DDD com formatação diferente), ajuste esse
+`split("@")[0]` conforme o que você vir na execução.
 
 ### 4.4 — Postgres: buscar cliente pelo telefone
 
@@ -346,14 +384,21 @@ exatamente a garantia que o painel depende para isolar advogados entre si.
   do cliente para "qual processo" também vai passar pela IA de novo — isso
   funciona bem na maioria dos casos mas não foi pensado como uma máquina de
   estados rígida feito a verificação de CPF (que é código puro, não IA).
-- Payloads exatos da Evolution API e nomes de endpoint podem ter mudado
-  desde que este guia foi escrito — trate os JSONs acima como o formato
-  esperado, não como garantia, e ajuste conforme o que você vir nas
-  execuções reais do n8n.
+- O payload do webhook (4.1) e o node "Extrair e Filtrar" (4.3) já foram
+  confirmados contra uma execução real em produção (Evolution API v2) —
+  incluindo a pegadinha do `.body` aninhado e do `addressingMode: "lid"`
+  substituindo o telefone real por um identificador de privacidade em
+  `data.key.remoteJid` (por isso o código usa `body.sender`). Os
+  **endpoints de envio de mensagem** (4.9, `POST
+  /message/sendText/<instancia>`) ainda não foram testados end-to-end —
+  se a resposta do bot não chegar no WhatsApp do cliente, confira o
+  formato exato desse endpoint na sua versão antes de suspeitar de outra
+  coisa.
 - O arquivo `n8n/workflow-atendimento-whatsapp.json` foi escrito
-  manualmente com base no formato de exportação do n8n, sem testar um
-  import real — trate-o como um ponto de partida sólido para os nodes
-  clássicos (Webhook, IF, Postgres, Code, HTTP Request) e como referência
-  a ser conferida/ajustada para os três nodes de IA (AI Agent, modelo do
-  Gemini, tool de Postgres), que são a parte do n8n que mais muda de
-  formato entre versões.
+  manualmente com base no formato de exportação do n8n. O node "Extrair e
+  Filtrar" já foi corrigido contra uma execução real (ver acima); o resto
+  dos nodes clássicos (Webhook, IF, Postgres, Code, HTTP Request) segue
+  sendo o desenho original, ainda não testado ponta a ponta; os três nodes
+  de IA (AI Agent, modelo do Gemini, tool de Postgres) são a parte do n8n
+  que mais muda de formato entre versões e os mais prováveis de precisar
+  de ajuste manual.
