@@ -3,6 +3,9 @@
 import { use } from "react";
 import { useActionState } from "react";
 import { createProcessoAction } from "@/app/actions/processos";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Field, inputClass } from "@/components/ui/Field";
+import { buttonClass } from "@/components/ui/button-styles";
 
 export default function NovoProcessoPage({
   params,
@@ -14,23 +17,31 @@ export default function NovoProcessoPage({
   const [state, formAction, pending] = useActionState(action, {});
 
   return (
-    <div>
-      <h1>Novo processo</h1>
-      <form action={formAction}>
-        <label>
-          Número do processo
-          <input name="numeroProcesso" required />
-        </label>
-        <label>
-          Descrição
-          <input name="descricao" required />
-        </label>
-        <label>
-          Status inicial
-          <input name="statusAtual" required />
-        </label>
-        {state?.error && <p role="alert">{state.error}</p>}
-        <button type="submit" disabled={pending}>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Novo processo" />
+      <form
+        action={formAction}
+        className="flex max-w-md flex-col gap-4 rounded-lg border border-slate bg-paper-raised p-6"
+      >
+        <Field label="Número do processo">
+          <input name="numeroProcesso" required className={inputClass} />
+        </Field>
+        <Field label="Descrição">
+          <input name="descricao" required className={inputClass} />
+        </Field>
+        <Field label="Status inicial">
+          <input name="statusAtual" required className={inputClass} />
+        </Field>
+        {state?.error && (
+          <p role="alert" className="text-sm text-brick">
+            {state.error}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={pending}
+          className={`${buttonClass("primary")} mt-2`}
+        >
           {pending ? "Salvando..." : "Salvar"}
         </button>
       </form>
