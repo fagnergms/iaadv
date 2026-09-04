@@ -1,26 +1,38 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-paper: #f5f6f8;
+  --color-paper-raised: #ffffff;
+  --color-ink: #1c2333;
+  --color-ink-muted: #5b6472;
+  --color-slate: #d8dce3;
+  --color-slate-soft: #e8eaef;
+  --color-brass: #9c7a3c;
+  --color-brass-dark: #7d6130;
+  --color-moss: #3f7a5c;
+  --color-moss-bg: #e6f0ea;
+  --color-brick: #a23e3e;
+  --color-brick-bg: #f6e8e8;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-paper: var(--color-paper);
+  --color-paper-raised: var(--color-paper-raised);
+  --color-ink: var(--color-ink);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-slate: var(--color-slate);
+  --color-slate-soft: var(--color-slate-soft);
+  --color-brass: var(--color-brass);
+  --color-brass-dark: var(--color-brass-dark);
+  --color-moss: var(--color-moss);
+  --color-moss-bg: var(--color-moss-bg);
+  --color-brick: var(--color-brick);
+  --color-brick-bg: var(--color-brick-bg);
+  --font-sans: var(--font-plex-sans);
+  --font-serif: var(--font-lora);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-paper);
+  color: var(--color-ink);
 }
