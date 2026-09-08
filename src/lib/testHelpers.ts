@@ -2,7 +2,7 @@ import { prisma } from "./db";
 
 export async function resetDb() {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "historico_status", "processos", "clientes", "advogados" RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE "historico_status", "processos", "clientes", "advogados", "conversas", "mensagens_chat" RESTART IDENTITY CASCADE'
   );
 }
 
