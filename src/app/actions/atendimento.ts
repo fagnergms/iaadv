@@ -14,6 +14,7 @@ import { verificarTurnstile } from "@/lib/turnstile";
 import { prisma } from "@/lib/db";
 
 const COOKIE_NAME = "atendimento_session";
+const PENDING_COOKIE_NAME = "atendimento_pending_telefone";
 
 export async function identificarTelefoneAction(
   _prevState: { error?: string } | undefined,
@@ -41,14 +42,49 @@ export async function identificarTelefoneAction(
     };
   }
 
-  redirect(`/atendimento/confirmar?telefone=${encodeURIComponent(telefone)}`);
+  // O telefone so fica disponivel pra confirmarCpfAction atraves deste
+  // cookie httpOnly de curta duracao - nunca via query string (vazaria em
+  // log de acesso/proxy reverso, ex. Coolify/nginx, alem de ficar no
+  // historico do navegador) e nunca como argumento vindo do client
+  // (bind/formData) que confirmarCpfAction simplesmente confiasse. Setado
+  // so aqui, depois que Turnstile e o lookup por telefone ja passaram os
+  // dois - igual a disciplina do cookie de sessao logo abaixo. httpOnly
+  // bloqueia leitura via JS; secure (em producao) evita trafego em claro
+  // fora de HTTPS; sameSite=lax segue o mesmo padrao do cookie de sessao;
+  // path restrito a /atendimento porque nao serve pra nada fora dessas
+  // rotas; maxAge curto (10 min) limita a janela caso o cookie vaze de
+  // outra forma. Como confirmarCpfAction le o telefone exclusivamente
+  // deste cookie (nunca de um parametro vindo do client), nao ha como
+  // invocar a Server Action de confirmacao - nem via POST direto pro
+  // endpoint da action, sem nunca ter passado pela pagina - com um
+  // telefone escolhido a dedo: sem ter passado por aqui (Turnstile +
+  // lookup OK), nao existe cookie, logo nao ha telefone nenhum pra tentar.
+  const cookieStore = await cookies();
+  cookieStore.set(PENDING_COOKIE_NAME, telefone, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 10,
+    path: "/atendimento",
+  });
+
+  redirect("/atendimento/confirmar");
 }
 
 export async function confirmarCpfAction(
-  telefone: string,
   _prevState: { error?: string } | undefined,
   formData: FormData
 ): Promise<{ error?: string }> {
+  const cookieStore = await cookies();
+
+  // telefone vem exclusivamente do cookie httpOnly setado por
+  // identificarTelefoneAction (ver comentario la) - nunca de um bind/prop
+  // vindo do client. Sem o cookie, nao houve identificacao valida (com
+  // Turnstile) nesta sessao de navegador; redireciona de volta pro inicio
+  // do fluxo em vez de aceitar qualquer telefone que a requisicao alegue.
+  const telefone = cookieStore.get(PENDING_COOKIE_NAME)?.value;
+  if (!telefone) redirect("/atendimento");
+
   const cpf = String(formData.get("cpf") ?? "");
   const resultado = await confirmarCpf(telefone, cpf);
 
@@ -66,13 +102,16 @@ export async function confirmarCpfAction(
     };
   }
 
-  // O cookie so e setado aqui, depois de confirmarCpf ja ter retornado
-  // "confirmado" com um sessionToken real gerado no servidor (crypto.
-  // randomBytes em src/lib/atendimento.ts) - nunca antes/especulativamente.
-  // httpOnly bloqueia leitura via JS no navegador (mitiga XSS lendo o
-  // token); secure (em producao) evita o cookie trafegar em texto claro
-  // fora de HTTPS; sameSite=lax segue a especificacao do plano.
-  const cookieStore = await cookies();
+  // O cookie de sessao so e setado aqui, depois de confirmarCpf ja ter
+  // retornado "confirmado" com um sessionToken real gerado no servidor
+  // (crypto.randomBytes em src/lib/atendimento.ts) - nunca antes/
+  // especulativamente. httpOnly bloqueia leitura via JS no navegador
+  // (mitiga XSS lendo o token); secure (em producao) evita o cookie
+  // trafegar em texto claro fora de HTTPS; sameSite=lax segue a
+  // especificacao do plano. O cookie pendente de telefone e removido aqui
+  // porque ja cumpriu seu papel (virou sessao verificada) - nao precisa
+  // mais existir.
+  cookieStore.delete(PENDING_COOKIE_NAME);
   cookieStore.set(COOKIE_NAME, resultado.sessionToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
