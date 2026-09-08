@@ -41,7 +41,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Confirmado contra execucoes reais: o n8n embrulha o corpo do webhook em\n// {headers, body, ...} - o payload da Evolution esta em .body, nao direto\n// no item. IMPORTANTE: body.sender e o numero da PROPRIA instancia (util so\n// quando ha varias instancias conectadas), NAO o do cliente - usar esse\n// campo aqui foi tentado e estava errado (o bot mandava mensagem pra si\n// mesmo). O numero do cliente e sempre data.key.remoteJid, mesmo quando\n// addressingMode e \"lid\" (isso so descreve como o WhatsApp resolveu o\n// identificador, o valor continua sendo o contato correto).\nconst wrapper = $input.first().json;\nconst body = wrapper.body;\nconst data = body?.data;\n\nif (!data || !data.key || data.key.fromMe) {\n  // mensagem enviada pelo proprio bot, ou payload sem o formato esperado: ignora\n  return [];\n}\n\nconst texto =\n  data.message?.conversation ??\n  data.message?.extendedTextMessage?.text ??\n  \"\";\n\nif (!texto) {\n  // mensagem sem texto (audio, imagem, etc.) - por enquanto o bot so trata texto\n  return [];\n}\n\nconst telefone = \"+\" + data.key.remoteJid.split(\"@\")[0];\n\nreturn [{ json: { telefone, texto } }];"
+        "jsCode": "// Confirmado contra execucoes reais: o n8n embrulha o corpo do webhook em\n// {headers, body, ...} - o payload da Evolution esta em .body, nao direto\n// no item. IMPORTANTE: body.sender e o numero da PROPRIA instancia (util so\n// quando ha varias instancias conectadas), NAO o do cliente - usar esse\n// campo aqui foi tentado e estava errado (o bot mandava mensagem pra si\n// mesmo). O numero do cliente e sempre data.key.remoteJid, mesmo quando\n// addressingMode e \"lid\" (isso so descreve como o WhatsApp resolveu o\n// identificador, o valor continua sendo o contato correto).\nconst wrapper = $input.first().json;\nconst body = wrapper.body;\nconst data = body?.data;\n\nif (!data || !data.key || data.key.fromMe) {\n  // mensagem enviada pelo proprio bot, ou payload sem o formato esperado: ignora\n  return [];\n}\n\nconst texto =\n  data.message?.conversation ??\n  data.message?.extendedTextMessage?.text ??\n  \"\";\n\nif (!texto) {\n  // mensagem sem texto (audio, imagem, etc.) - por enquanto o bot so trata texto\n  return [];\n}\n\nconst telefone = \"+\" + data.key.remoteJid.split(\"@\")[0];\n\n// Celular brasileiro pode chegar com ou sem o 9o digito depois do DDD - o\n// WhatsApp nao e consistente nisso, e o advogado pode ter cadastrado o\n// cliente na outra forma. Gera a variante alternativa pra buscar por\n// qualquer uma das duas (ver node \"Buscar Cliente\").\nlet telefoneVariante = telefone;\nconst match = telefone.match(/^\\+55(\\d{2})(\\d{8,9})$/);\nif (match) {\n  const [, ddd, numero] = match;\n  telefoneVariante =\n    numero.length === 9 ? `+55${ddd}${numero.slice(1)}` : `+55${ddd}9${numero}`;\n}\n\nreturn [{ json: { telefone, telefoneVariante, texto } }];"
       },
       "id": "code-extrair",
       "name": "Extrair e Filtrar",
@@ -52,9 +52,9 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, nome, cpf, advogado_id FROM clientes WHERE telefone = $1",
+        "query": "SELECT id, nome, cpf, advogado_id FROM clientes WHERE telefone = $1 OR telefone = $2",
         "options": {
-          "queryReplacement": "={{ [$json.telefone] }}"
+          "queryReplacement": "={{ [$json.telefone, $json.telefoneVariante] }}"
         }
       },
       "id": "pg-buscar-cliente",
