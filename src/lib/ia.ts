@@ -78,14 +78,34 @@ export async function responderComIA(
     // Mesmo que o modelo alucine um campo tipo clienteId na chamada, ele e
     // ignorado: `calls` so serve pra saber que a ferramenta foi invocada.
     const processos = await listProcessosDoCliente(clienteId);
-    result = await chat.sendMessage([
-      {
-        functionResponse: {
-          name: "buscar_processos",
-          response: { processos },
+
+    // Nao usamos chat.sendMessage() aqui: o SDK instalado marca qualquer
+    // parte com functionResponse com role "function" (ver
+    // assignRoleToPartsAndValidateSendMessageRequest em
+    // node_modules/@google/generative-ai), role que a API atual do Gemini
+    // rejeita com 400 pros modelos "thinking" (geracao 2.5+) - so aceita
+    // vir como "user". Contornamos chamando model.generateContent()
+    // diretamente com o historico do chat (que ja preserva o
+    // thoughtSignature exigido no turno do functionCall, porque
+    // chat.getHistory() devolve o content bruto da resposta da API, sem
+    // remover campos que o SDK nao conhece) mais o functionResponse com
+    // role "user".
+    result = await model.generateContent({
+      contents: [
+        ...(await chat.getHistory()),
+        {
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                name: "buscar_processos",
+                response: { processos },
+              },
+            },
+          ],
         },
-      },
-    ]);
+      ],
+    });
   }
 
   return interpretarRespostaIA(result.response.text());
