@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { prisma } from "./db";
 import { resetDb, makeAdvogado } from "./testHelpers";
-import { createCliente } from "./clientes";
+import { createCliente, updateCliente } from "./clientes";
 import {
   buscarClientePorTelefone,
   confirmarCpf,
@@ -93,6 +93,75 @@ describe("atendimento service", () => {
     });
 
     expect(await obterConversaValida(confirmado.sessionToken)).toBeNull();
+  });
+
+  it("sessao continua valida mesmo se o telefone do cliente for atualizado depois da confirmacao", async () => {
+    // obterConversaValida resolve o cliente por Conversa.clienteId (gravado
+    // atomicamente com o sessionToken em confirmarCpf), nunca mais por
+    // Conversa.telefone. Antes desta correcao, um advogado editando o
+    // telefone cadastrado do cliente (updateCliente, uma acao rotineira)
+    // quebrava silenciosamente a sessao ja emitida - o relookup por telefone
+    // em obterConversaValida deixava de encontrar o cliente.
+    const advogado = await makeAdvogado();
+    const cliente = await createCliente(advogado.id, clienteInput);
+
+    const confirmado = await confirmarCpf(clienteInput.telefone, "7735");
+    if (confirmado.status !== "confirmado") throw new Error("setup falhou");
+
+    await updateCliente(advogado.id, cliente.id, {
+      ...clienteInput,
+      telefone: "+5511999990099",
+    });
+
+    const sessao = await obterConversaValida(confirmado.sessionToken);
+    expect(sessao?.cliente.id).toBe(cliente.id);
+  });
+
+  it("sessao antiga nao vaza dados do novo dono de um telefone reatribuido", async () => {
+    // Propriedade de seguranca central desta correcao: se o telefone do
+    // cliente A e liberado (reeditado pra outro numero) e depois cadastrado
+    // pra um cliente B diferente, uma sessao de A emitida ANTES da troca
+    // nunca deve passar a resolver os dados juridicos de B, mesmo que ambos
+    // compartilhem a mesma linha de Conversa (unica por telefone). Amarrar a
+    // sessao a clienteId em vez de telefone garante isso: quando B confirma
+    // o proprio CPF nesse mesmo numero, um sessionToken NOVO e emitido
+    // (sobrescrevendo o antigo na mesma linha de Conversa), entao o token
+    // antigo que A ainda segura deixa de bater com qualquer sessao - a
+    // sessao de A e invalidada, nunca redirecionada pros dados de B.
+    const advogado = await makeAdvogado();
+    const clienteA = await createCliente(advogado.id, clienteInput);
+
+    const confirmadoA = await confirmarCpf(clienteInput.telefone, "7735");
+    if (confirmadoA.status !== "confirmado") throw new Error("setup falhou");
+
+    // Libera o telefone de A (muda pra outro numero) e cadastra um cliente B
+    // novo com o telefone que A tinha antes.
+    await updateCliente(advogado.id, clienteA.id, {
+      ...clienteInput,
+      telefone: "+5511999990099",
+    });
+    const clienteB = await createCliente(advogado.id, {
+      nome: "Joao Souza",
+      telefone: clienteInput.telefone,
+      cpf: "529.982.247-25",
+    });
+
+    // B se identifica e confirma o proprio CPF no telefone reatribuido
+    // (ultimos 4 digitos de "529.982.247-25" = "4725").
+    const confirmadoB = await confirmarCpf(clienteInput.telefone, "4725");
+    expect(confirmadoB.status).toBe("confirmado");
+    if (confirmadoB.status !== "confirmado") throw new Error("setup falhou");
+
+    // O sessionToken antigo de A nao resolve mais sessao nenhuma (foi
+    // sobrescrito pelo novo token de B na mesma linha de Conversa) - em
+    // particular, NUNCA resolve os dados de B.
+    const sessaoComTokenAntigo = await obterConversaValida(confirmadoA.sessionToken);
+    expect(sessaoComTokenAntigo).toBeNull();
+
+    // O novo sessionToken de B resolve corretamente o cliente B (nunca A).
+    const sessaoDeB = await obterConversaValida(confirmadoB.sessionToken);
+    expect(sessaoDeB?.cliente.id).toBe(clienteB.id);
+    expect(sessaoDeB?.cliente.id).not.toBe(clienteA.id);
   });
 
   it("nao permite mais de 3 tentativas efetivas mesmo com falhas concorrentes (race no contador)", async () => {
