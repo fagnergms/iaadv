@@ -12,12 +12,12 @@ export function Chat({ mensagensIniciais }: { mensagensIniciais: MensagemChat[] 
 
   useEffect(() => {
     // So limpa o campo em caso de sucesso genuino: nao pendente E sem erro.
-    // Antes desta correcao, o efeito rodava a cada mudanca de `state`
-    // (inclusive quando `state.error` estava preenchido apos uma falha),
-    // mas so checava `pending` - entao um retorno com erro tambem limpava o
-    // formulario, apagando o texto que o cliente acabou de digitar bem no
-    // momento em que ele mais precisaria dele pra tentar de novo ou pra ler
-    // o que tinha escrito.
+    // Esse invariante depende de enviarMensagemAction sempre devolver
+    // {error} em vez de lancar excecao em falhas de IA/Turnstile - assim o
+    // formulario preserva o texto que o cliente digitou quando a submissao
+    // falha, bem no momento em que ele mais precisaria dele pra tentar de
+    // novo ou pra ler o que tinha escrito, e o <p role="alert"> abaixo exibe
+    // o erro.
     if (!pending && !state?.error) {
       formRef.current?.reset();
     }
