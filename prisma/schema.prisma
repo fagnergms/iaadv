@@ -74,6 +74,7 @@ model HistoricoStatus {
 model Conversa {
   id                   String    @id @default(uuid())
   telefone             String    @unique
+  clienteId            String?   @map("cliente_id")
   verificadoEm         DateTime? @map("verificado_em")
   tentativasFalhas     Int       @default(0) @map("tentativas_falhas")
   ultimaMensagemEm     DateTime  @map("ultima_mensagem_em")
