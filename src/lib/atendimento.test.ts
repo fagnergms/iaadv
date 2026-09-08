@@ -6,6 +6,9 @@ import {
   buscarClientePorTelefone,
   confirmarCpf,
   obterConversaValida,
+  iniciarConfirmacaoCpf,
+  obterTelefonePendente,
+  invalidarConfirmacaoPendente,
 } from "./atendimento";
 
 const clienteInput = {
@@ -280,5 +283,43 @@ describe("atendimento service", () => {
     // E uma tentativa isolada e correta, depois do lote, continua bloqueada.
     const tentativaIsolada = await confirmarCpf(clienteInput.telefone, "7735");
     expect(tentativaIsolada.status).toBe("bloqueado");
+  });
+
+  describe("pending token de confirmacao de CPF", () => {
+    it("token recem-emitido resolve pro telefone correto", async () => {
+      const telefone = "+5511999990000";
+      const token = await iniciarConfirmacaoCpf(telefone);
+
+      expect(await obterTelefonePendente(token)).toBe(telefone);
+    });
+
+    it("token expirado retorna null em vez do telefone", async () => {
+      // Mesmo mecanismo do teste de expiracao de sessao (24h) acima: escreve
+      // um pendingTokenExpiraEm no passado diretamente via Prisma,
+      // simulando os 10 minutos de validade do pending token ja terem
+      // passado.
+      const telefone = "+5511999990000";
+      const token = await iniciarConfirmacaoCpf(telefone);
+
+      await prisma.conversa.update({
+        where: { telefone },
+        data: { pendingTokenExpiraEm: new Date(Date.now() - 60 * 1000) },
+      });
+
+      expect(await obterTelefonePendente(token)).toBeNull();
+    });
+
+    it("token invalidado deixa de resolver depois de invalidarConfirmacaoPendente", async () => {
+      const telefone = "+5511999990000";
+      const token = await iniciarConfirmacaoCpf(telefone);
+
+      await invalidarConfirmacaoPendente(telefone);
+
+      expect(await obterTelefonePendente(token)).toBeNull();
+    });
+
+    it("token inexistente/invalido retorna null sem lancar excecao", async () => {
+      expect(await obterTelefonePendente("token-que-nao-existe")).toBeNull();
+    });
   });
 });
