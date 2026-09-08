@@ -166,27 +166,80 @@ export async function confirmarCpf(
   // reset+token só é gravado se, no momento exato deste UPDATE, a linha
   // ainda estiver com tentativasFalhas < MAX_TENTATIVAS (mesma serialização
   // por linha do Postgres que torna o incremento acima atômico).
+  // Antes de emitir o token, verifica se esta linha de Conversa esta sendo
+  // REVINCULADA a um cliente diferente do que ela tinha antes - o caso de um
+  // telefone liberado (editado no cadastro do dono antigo) e depois
+  // registrado pra um cliente novo. Usa o clienteId ja lido em
+  // `conversaAtual`, no topo da funcao: aquele read aconteceu antes de
+  // qualquer verificacao de CPF, entao ainda nao serve pra decidir se o CPF
+  // confere (nunca decidimos apagar nada so por causa dele) - serve só pra
+  // saber quem era o dono da linha ANTES desta tentativa, e o id da propria
+  // linha (conversaAtual.id) não muda entre esse read e o write abaixo, já
+  // que o id é imutável após criado. Reusar esse read em vez de ler de novo
+  // aqui NÃO reabre o TOCTOU do lockout corrigido nos rounds anteriores:
+  // aquele bug era sobre decidir se o write de sucesso podia commitar com
+  // base num tentativasFalhas desatualizado; aqui a decisão de bloquear
+  // continua inteiramente no updateMany condicional abaixo, e o delete do
+  // histórico só roda se aquele update realmente afetar a linha - nunca
+  // especulativamente antes disso.
+  const clienteAnteriorId = conversaAtual.clienteId;
+  const revinculandoParaOutroCliente =
+    clienteAnteriorId !== null && clienteAnteriorId !== cliente.id;
+
   const sessionToken = crypto.randomBytes(32).toString("hex");
-  const resultado = await prisma.conversa.updateMany({
-    where: { telefone, tentativasFalhas: { lt: MAX_TENTATIVAS } },
-    data: {
-      verificadoEm: new Date(),
-      tentativasFalhas: 0,
-      ultimaMensagemEm: new Date(),
-      sessionToken,
-      // clienteId e gravado no MESMO write atomico que emite o sessionToken
-      // (nunca um update separado depois) - a sessao nasce ja amarrada ao
-      // cliente que passou pela verificacao de CPF neste exato momento.
-      // Antes disso, obterConversaValida resolvia o cliente relendo
-      // Cliente.telefone a cada chamada, o que quebra silenciosamente se um
-      // advogado editar o telefone do cliente depois (updateCliente em
-      // src/lib/clientes.ts) - e pior, se aquele telefone antigo for
-      // realocado pra OUTRO cliente enquanto a sessao de 24h ainda esta
-      // valida, o token antigo passaria a resolver os dados juridicos do
-      // cliente errado. Amarrar a sessao ao clienteId (imutavel apos
-      // confirmado) em vez do telefone (mutavel) elimina os dois problemas.
-      clienteId: cliente.id,
-    },
+
+  // O write de confirmação e o delete do histórico anterior (quando a linha
+  // está sendo revinculada) precisam commitar juntos ou nenhum dos dois -
+  // por isso os dois vivem na mesma transação. Sem isso haveria uma janela
+  // em que ou (a) o cliente novo já tem sessionToken válido mas ainda
+  // enxergaria o histórico do cliente antigo (write comita, delete falha),
+  // ou (b) o histórico de outro cliente seria apagado sem que nenhuma sessão
+  // nova tivesse sido de fato emitida (delete comita, write falha). O delete
+  // só roda DENTRO da transação e SÓ SE `atualizacao.count > 0` - ou seja,
+  // só depois que o guard `tentativasFalhas < MAX_TENTATIVAS` realmente
+  // passou neste commit exato -, nunca de forma especulativa antes de saber
+  // se a confirmação foi aceita: um chute que colidisse com um bloqueio
+  // concorrente (ver teste do lote acima) não deve apagar o histórico do
+  // dono anterior sem confirmar ninguém.
+  const resultado = await prisma.$transaction(async (tx) => {
+    const atualizacao = await tx.conversa.updateMany({
+      where: { telefone, tentativasFalhas: { lt: MAX_TENTATIVAS } },
+      data: {
+        verificadoEm: new Date(),
+        tentativasFalhas: 0,
+        ultimaMensagemEm: new Date(),
+        sessionToken,
+        // clienteId e gravado no MESMO write atomico que emite o sessionToken
+        // (nunca um update separado depois) - a sessao nasce ja amarrada ao
+        // cliente que passou pela verificacao de CPF neste exato momento.
+        // Antes disso, obterConversaValida resolvia o cliente relendo
+        // Cliente.telefone a cada chamada, o que quebra silenciosamente se um
+        // advogado editar o telefone do cliente depois (updateCliente em
+        // src/lib/clientes.ts) - e pior, se aquele telefone antigo for
+        // realocado pra OUTRO cliente enquanto a sessao de 24h ainda esta
+        // valida, o token antigo passaria a resolver os dados juridicos do
+        // cliente errado. Amarrar a sessao ao clienteId (imutavel apos
+        // confirmado) em vez do telefone (mutavel) elimina os dois problemas.
+        clienteId: cliente.id,
+      },
+    });
+
+    if (atualizacao.count > 0 && revinculandoParaOutroCliente) {
+      // Conversa é única por telefone, então o histórico antigo
+      // (MensagemChat.conversaId aponta pra esta mesma linha) pertence ao
+      // cliente que tinha esse número antes - nunca pode ficar visível pro
+      // novo dono do número: nem em tela (listarMensagens, renderizado em
+      // src/app/atendimento/page.tsx) nem no contexto enviado pro Gemini
+      // (enviarMensagemAction lê o histórico pelo mesmo conversaId). Uma
+      // troca de telefone é uma ação administrativa rotineira (updateCliente)
+      // - não devia bastar pra vazar a conversa jurídica de um cliente pro
+      // próximo que receber o número.
+      await tx.mensagemChat.deleteMany({
+        where: { conversaId: conversaAtual.id },
+      });
+    }
+
+    return atualizacao;
   });
 
   if (resultado.count === 0) {
