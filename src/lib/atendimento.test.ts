@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { prisma } from "./db";
 import { resetDb, makeAdvogado } from "./testHelpers";
 import { createCliente, updateCliente } from "./clientes";
+import { listarMensagens, adicionarMensagem } from "./mensagens";
 import {
   buscarClientePorTelefone,
   confirmarCpf,
@@ -165,6 +166,72 @@ describe("atendimento service", () => {
     const sessaoDeB = await obterConversaValida(confirmadoB.sessionToken);
     expect(sessaoDeB?.cliente.id).toBe(clienteB.id);
     expect(sessaoDeB?.cliente.id).not.toBe(clienteA.id);
+  });
+
+  it("historico de chat do dono anterior do telefone nao vaza pro novo dono depois de um telefone reatribuido", async () => {
+    // Segunda metade do bug corrigido no round anterior (que so amarrou
+    // Conversa.clienteId): a linha de Conversa e unica por TELEFONE, entao
+    // quando B confirma o CPF no numero que A teve antes, confirmarCpf
+    // reusa a MESMA linha (upsert por telefone) e so atualiza clienteId -
+    // as MensagemChat que ja apontavam pra esse conversaId, escritas
+    // enquanto a linha ainda era de A, ficavam penduradas nela. Sem a
+    // correcao, o primeiro carregamento de B em /atendimento (que chama
+    // listarMensagens no mesmo conversaId) mostraria o historico juridico
+    // inteiro de A pra B - um vazamento de sigilo entre dois clientes reais
+    // do escritorio, sem exigir roubo de token nenhum, so a sequencia
+    // rotineira de um advogado editar o telefone de A e cadastrar B com o
+    // numero liberado.
+    const advogado = await makeAdvogado();
+    const clienteA = await createCliente(advogado.id, clienteInput);
+
+    const confirmadoA = await confirmarCpf(clienteInput.telefone, "7735");
+    if (confirmadoA.status !== "confirmado") throw new Error("setup falhou");
+
+    // Semeia o historico de A na conversa (mensagem do cliente + resposta do
+    // bot), simulando uma troca real que ja aconteceu antes da reatribuicao
+    // do numero.
+    await adicionarMensagem(
+      confirmadoA.conversaId,
+      "cliente",
+      "SEGREDO-DE-A: como esta meu processo de divorcio?"
+    );
+    await adicionarMensagem(
+      confirmadoA.conversaId,
+      "bot",
+      "Seu processo esta em andamento, proxima audiencia dia 10."
+    );
+
+    // Libera o telefone de A e cadastra B com o numero liberado, exatamente
+    // como no teste de vazamento de sessao acima.
+    await updateCliente(advogado.id, clienteA.id, {
+      ...clienteInput,
+      telefone: "+5511999990099",
+    });
+    const clienteB = await createCliente(advogado.id, {
+      nome: "Joao Souza",
+      telefone: clienteInput.telefone,
+      cpf: "529.982.247-25",
+    });
+
+    // B se identifica e confirma o proprio CPF no telefone reatribuido
+    // (ultimos 4 digitos de "529.982.247-25" = "4725").
+    const confirmadoB = await confirmarCpf(clienteInput.telefone, "4725");
+    expect(confirmadoB.status).toBe("confirmado");
+    if (confirmadoB.status !== "confirmado") throw new Error("setup falhou");
+
+    // Mesma linha de Conversa reaproveitada (unica por telefone) - e
+    // exatamente por isso que o historico precisa ser limpo nela.
+    expect(confirmadoB.conversaId).toBe(confirmadoA.conversaId);
+
+    // A conversa de B tem que comecar absolutamente do zero: e uma relacao
+    // nova entre o escritorio e B nesse numero, entao nao existe historico
+    // nenhum que faca sentido preservar - nem o texto de A deveria
+    // sobreviver de forma nenhuma, nem qualquer outra mensagem antiga.
+    const mensagensDeB = await listarMensagens(confirmadoB.conversaId);
+    expect(mensagensDeB).toHaveLength(0);
+    expect(
+      mensagensDeB.some((m) => m.texto.includes("SEGREDO-DE-A"))
+    ).toBe(false);
   });
 
   it("nao permite mais de 3 tentativas efetivas mesmo com falhas concorrentes (race no contador)", async () => {
