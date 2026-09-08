@@ -174,6 +174,18 @@ export async function confirmarCpf(
       tentativasFalhas: 0,
       ultimaMensagemEm: new Date(),
       sessionToken,
+      // clienteId e gravado no MESMO write atomico que emite o sessionToken
+      // (nunca um update separado depois) - a sessao nasce ja amarrada ao
+      // cliente que passou pela verificacao de CPF neste exato momento.
+      // Antes disso, obterConversaValida resolvia o cliente relendo
+      // Cliente.telefone a cada chamada, o que quebra silenciosamente se um
+      // advogado editar o telefone do cliente depois (updateCliente em
+      // src/lib/clientes.ts) - e pior, se aquele telefone antigo for
+      // realocado pra OUTRO cliente enquanto a sessao de 24h ainda esta
+      // valida, o token antigo passaria a resolver os dados juridicos do
+      // cliente errado. Amarrar a sessao ao clienteId (imutavel apos
+      // confirmado) em vez do telefone (mutavel) elimina os dois problemas.
+      clienteId: cliente.id,
     },
   });
 
@@ -200,8 +212,20 @@ export async function obterConversaValida(sessionToken: string) {
     Date.now() - conversa.verificadoEm.getTime() < SESSAO_VALIDADE_MS;
   if (!sessaoValida) return null;
 
+  // Resolve o cliente pelo clienteId gravado atomicamente com o
+  // sessionToken em confirmarCpf - nunca mais por conversa.telefone (que e
+  // mutavel: um advogado pode reeditar o telefone cadastrado do cliente via
+  // updateCliente a qualquer momento). Resolver por telefone permitiria uma
+  // sessao ja emitida "seguir" o numero antigo se ele fosse reatribuido a
+  // outro cliente dentro da janela de 24h da sessao, vazando dados juridicos
+  // do cliente errado pra quem ainda segura o token antigo. clienteId nulo
+  // (conversa confirmada antes desta migracao, ou algum estado inconsistente
+  // nao esperado) e tratado como sessao invalida, igual a qualquer outro
+  // caso de sessao sem cliente resolvivel.
+  if (!conversa.clienteId) return null;
+
   const cliente = await prisma.cliente.findUnique({
-    where: { telefone: conversa.telefone },
+    where: { id: conversa.clienteId },
     select: { id: true, nome: true, advogadoId: true },
   });
   if (!cliente) return null;
