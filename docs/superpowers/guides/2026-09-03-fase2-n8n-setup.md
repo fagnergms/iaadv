@@ -242,63 +242,70 @@ WHERE telefone = '{{ $json.telefone }}' OR telefone = '{{ $json.telefoneVariante
 
 ### 4.6 — Postgres: buscar/criar `Conversa` e checar sessão
 
-Primeiro, busca:
-
-```sql
-SELECT * FROM conversas WHERE telefone = '{{ $json.telefone }}'
-```
-
-Em um node de código (Function), calcule se a sessão está válida **usando o
-valor antigo de `ultima_mensagem_em`, antes de atualizar**:
-
-```js
-const conversa = $json; // resultado da query acima, ou null se não existir
-const agora = new Date();
-const sessaoValida =
-  conversa &&
-  conversa.verificado_em &&
-  agora - new Date(conversa.ultima_mensagem_em) < 24 * 60 * 60 * 1000;
-
-return { sessaoValida, conversaExiste: !!conversa };
-```
-
-Depois, faça um **upsert** em `conversas` (Postgres node, modo "Upsert" ou um
-`INSERT ... ON CONFLICT (telefone) DO UPDATE`) atualizando
+Node "Buscar Conversa" (`SELECT * FROM conversas WHERE telefone = ...`),
+depois o node de código "Calcular Sessao", que calcula se a sessão está
+válida **usando o valor antigo de `ultima_mensagem_em`, antes de
+atualizar** — e junta os dados do cliente (node "Buscar Cliente") com os
+da conversa num único objeto de saída (`telefone`, `texto`, `clienteId`,
+`clienteCpf`, `advogadoId`, `conversaExiste`, `tentativasFalhas`,
+`sessaoValida`). Depois, o node "Upsert Conversa" (Postgres,
+`INSERT ... ON CONFLICT (telefone) DO UPDATE`) atualiza
 `ultima_mensagem_em = agora` — isso sempre acontece, independente do
 resultado da verificação.
 
+**Lição aprendida testando em produção, importante pro resto do fluxo:**
+todo node de Postgres (INSERT/UPDATE/SELECT) **substitui** o conteúdo do
+item que passa por ele pelo resultado da própria query — os campos que
+"Calcular Sessao" calculou (telefone, texto, clienteCpf, etc.) desaparecem
+assim que o item atravessa "Upsert Conversa". Por isso, todo node **depois**
+de "Upsert Conversa" (o IF de sessão válida, o node "Verificar CPF", o AI
+Agent) busca esses dados explicitamente pelo nome do node de origem —
+`$('Calcular Sessao').first().json.campo` — em vez de `$json.campo` direto.
+Use `.first()`, não `.item` (motivo: um item "vazio" sintético de um
+Postgres sem resultado não carrega o pareamento automático que `.item`
+precisa).
+
 ### 4.7 — IF: sessão válida?
+
+Condição: `{{ $('Calcular Sessao').first().json.sessaoValida }}`.
 
 - **Não** → siga para o **ramo de verificação de identidade** (4.7a).
 - **Sim** → siga direto para o **ramo da IA** (4.8).
 
-**4.7a — Ramo de verificação:** compare o texto recebido com os últimos 4
-dígitos do `cpf` do cliente (já vieram da query 4.4):
+**4.7a — Ramo de verificação (node de código "Verificar CPF"):** lê os
+dados com `const item = $('Calcular Sessao').first().json;` (não
+`$input`, pelo mesmo motivo do quadro acima) e compara o texto recebido
+com os últimos 4 dígitos do `cpf` do cliente:
 
 ```js
-const digitosRecebidos = $json.texto.replace(/\D/g, "").slice(-4);
-const digitosEsperados = $json.cpf.slice(-4);
-const confirmou = digitosRecebidos === digitosEsperados && digitosRecebidos.length === 4;
+const digitosRecebidos = (item.texto || "").replace(/\D/g, "").slice(-4);
+const digitosEsperados = (item.clienteCpf || "").replace(/\D/g, "").slice(-4);
+const confirmou = digitosRecebidos.length === 4 && digitosRecebidos === digitosEsperados;
 ```
 
-- **Confirmou** → Postgres: `UPDATE conversas SET verificado_em = now(),
-  tentativas_falhas = 0 WHERE telefone = '...'`. Responde "Identidade
+- **Confirmou** → Postgres ("Atualizar Conversa - Verificacao"):
+  `verificado_em = now(), tentativas_falhas = 0`. Responde "Identidade
   confirmada! Pode repetir sua pergunta." → **fim do workflow** (o cliente
   manda a pergunta de novo na próxima mensagem, que aí sim cai no ramo da
   IA).
-- **Não confirmou** → Postgres: `UPDATE conversas SET tentativas_falhas =
-  tentativas_falhas + 1 WHERE telefone = '...'`.
+- **Não confirmou** → Postgres: `tentativas_falhas = tentativas_falhas + 1`.
   - Se `tentativas_falhas` (depois de incrementar) `< 3` → responde pedindo
     os 4 últimos dígitos do CPF de novo.
   - Se `>= 3` → cria um `Escalonamento` (motivo: `"falha na verificação"`,
     ver 4.10) e responde "Não conseguimos confirmar sua identidade. Um
-    advogado vai entrar em contato."
+    advogado vai entrar em contato." — o node "Criar Escalonamento - Falha
+    Verificacao" e o node de resposta seguinte também buscam os dados via
+    `$('Verificar CPF').first().json...`, pelo mesmo motivo.
 
   **Se `conversaExiste` era `false`** (primeira mensagem desse telefone),
-  ignore a comparação acima nesta primeira passada e vá direto para pedir a
+  ignora a comparação acima nessa primeira passada e vai direto pedir a
   confirmação de CPF pela primeira vez, sem incrementar tentativa.
 
 ### 4.8 — Ramo da IA: AI Agent (Gemini) + tool de consulta
+
+O campo de texto do AI Agent também busca a pergunta em
+`$('Calcular Sessao').first().json.texto`, pelo mesmo motivo (o AI Agent
+fica depois de "Upsert Conversa" no fluxo).
 
 Node **AI Agent** do n8n, modelo = credencial do Gemini criada no Passo 3.
 
