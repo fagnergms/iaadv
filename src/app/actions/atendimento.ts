@@ -7,6 +7,9 @@ import {
   buscarClientePorTelefone,
   confirmarCpf,
   obterConversaValida,
+  iniciarConfirmacaoCpf,
+  obterTelefonePendente,
+  invalidarConfirmacaoPendente,
 } from "@/lib/atendimento";
 import { listarMensagens, adicionarMensagem } from "@/lib/mensagens";
 import { responderComIA } from "@/lib/ia";
@@ -42,25 +45,32 @@ export async function identificarTelefoneAction(
     };
   }
 
-  // O telefone so fica disponivel pra confirmarCpfAction atraves deste
-  // cookie httpOnly de curta duracao - nunca via query string (vazaria em
-  // log de acesso/proxy reverso, ex. Coolify/nginx, alem de ficar no
-  // historico do navegador) e nunca como argumento vindo do client
-  // (bind/formData) que confirmarCpfAction simplesmente confiasse. Setado
-  // so aqui, depois que Turnstile e o lookup por telefone ja passaram os
-  // dois - igual a disciplina do cookie de sessao logo abaixo. httpOnly
+  // O cookie NUNCA guarda o telefone em si - guarda um token opaco e
+  // imprevisivel (crypto.randomBytes(32), gerado e persistido server-side
+  // por iniciarConfirmacaoCpf, mesma tecnica do sessionToken abaixo). Isso
+  // importa porque httpOnly so impede leitura via JS no navegador; um
+  // cliente nao-navegador (curl, script) pode perfeitamente forjar um
+  // header `Cookie: atendimento_pending_telefone=<qualquer valor>` num POST
+  // direto pro endpoint da Server Action, sem nunca ter carregado a pagina
+  // nem passado pelo Turnstile. Se o cookie guardasse o telefone puro, esse
+  // POST forjado bastaria pra confirmarCpfAction aceitar qualquer telefone
+  // escolhido a dedo. Guardando um token que so tem correspondencia no
+  // banco quando gerado por uma passagem real por Turnstile + lookup (aqui
+  // embaixo), um cookie forjado com um valor arbitrario nao resolve
+  // telefone nenhum em confirmarCpfAction (obterTelefonePendente retorna
+  // null pra qualquer token que nao bata com um gerado por esta funcao) -
+  // o efeito pratico e o mesmo do sessionToken real: o valor sozinho, sem o
+  // registro correspondente no servidor, e inutil. Setado so aqui, depois
+  // que Turnstile e o lookup por telefone ja passaram os dois. httpOnly
   // bloqueia leitura via JS; secure (em producao) evita trafego em claro
   // fora de HTTPS; sameSite=lax segue o mesmo padrao do cookie de sessao;
   // path restrito a /atendimento porque nao serve pra nada fora dessas
-  // rotas; maxAge curto (10 min) limita a janela caso o cookie vaze de
-  // outra forma. Como confirmarCpfAction le o telefone exclusivamente
-  // deste cookie (nunca de um parametro vindo do client), nao ha como
-  // invocar a Server Action de confirmacao - nem via POST direto pro
-  // endpoint da action, sem nunca ter passado pela pagina - com um
-  // telefone escolhido a dedo: sem ter passado por aqui (Turnstile +
-  // lookup OK), nao existe cookie, logo nao ha telefone nenhum pra tentar.
+  // rotas; maxAge curto (10 min, mesma validade do token no banco) limita a
+  // janela caso o cookie vaze de outra forma.
+  const pendingToken = await iniciarConfirmacaoCpf(telefone);
+
   const cookieStore = await cookies();
-  cookieStore.set(PENDING_COOKIE_NAME, telefone, {
+  cookieStore.set(PENDING_COOKIE_NAME, pendingToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
@@ -77,12 +87,20 @@ export async function confirmarCpfAction(
 ): Promise<{ error?: string }> {
   const cookieStore = await cookies();
 
-  // telefone vem exclusivamente do cookie httpOnly setado por
-  // identificarTelefoneAction (ver comentario la) - nunca de um bind/prop
-  // vindo do client. Sem o cookie, nao houve identificacao valida (com
-  // Turnstile) nesta sessao de navegador; redireciona de volta pro inicio
-  // do fluxo em vez de aceitar qualquer telefone que a requisicao alegue.
-  const telefone = cookieStore.get(PENDING_COOKIE_NAME)?.value;
+  // O cookie guarda um token opaco, nunca o telefone (ver comentario em
+  // identificarTelefoneAction). telefone so e resolvido aqui atraves de
+  // obterTelefonePendente, que so devolve algo se o token bater com um
+  // registro gravado no servidor por uma passagem real por Turnstile +
+  // lookup - nunca confiando no valor cru do cookie (que um cliente
+  // nao-navegador poderia forjar livremente, ja que httpOnly so bloqueia
+  // leitura via JS, nao a escrita de um header Cookie arbitrario por quem
+  // nao e um navegador). Token ausente, invalido ou expirado: mesmo
+  // redirecionamento de volta pro inicio do fluxo, sem distinguir qual dos
+  // tres casos pro cliente.
+  const pendingToken = cookieStore.get(PENDING_COOKIE_NAME)?.value;
+  if (!pendingToken) redirect("/atendimento");
+
+  const telefone = await obterTelefonePendente(pendingToken);
   if (!telefone) redirect("/atendimento");
 
   const cpf = String(formData.get("cpf") ?? "");
@@ -108,9 +126,11 @@ export async function confirmarCpfAction(
   // especulativamente. httpOnly bloqueia leitura via JS no navegador
   // (mitiga XSS lendo o token); secure (em producao) evita o cookie
   // trafegar em texto claro fora de HTTPS; sameSite=lax segue a
-  // especificacao do plano. O cookie pendente de telefone e removido aqui
-  // porque ja cumpriu seu papel (virou sessao verificada) - nao precisa
-  // mais existir.
+  // especificacao do plano. O pendingToken (cookie + registro no banco) e
+  // invalidado aqui porque ja cumpriu seu papel (virou sessao verificada) -
+  // nao precisa mais existir, e nao ha motivo pra deixar um token ainda
+  // valido "sobrando" depois que a sessao real ja foi emitida.
+  await invalidarConfirmacaoPendente(telefone);
   cookieStore.delete(PENDING_COOKIE_NAME);
   cookieStore.set(COOKIE_NAME, resultado.sessionToken, {
     httpOnly: true,
