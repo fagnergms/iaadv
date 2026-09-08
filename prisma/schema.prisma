@@ -78,8 +78,27 @@ model Conversa {
   tentativasFalhas Int       @default(0) @map("tentativas_falhas")
   ultimaMensagemEm DateTime  @map("ultima_mensagem_em")
   criadoEm         DateTime  @default(now()) @map("criado_em")
+  sessionToken     String?   @unique @map("session_token")
+
+  mensagens        MensagemChat[]
 
   @@map("conversas")
+}
+
+enum RemetenteMensagem {
+  cliente
+  bot
+}
+
+model MensagemChat {
+  id         String            @id @default(uuid())
+  conversaId String            @map("conversa_id")
+  conversa   Conversa          @relation(fields: [conversaId], references: [id])
+  remetente  RemetenteMensagem
+  texto      String
+  criadoEm   DateTime          @default(now()) @map("criado_em")
+
+  @@map("mensagens_chat")
 }
 
 model Escalonamento {
