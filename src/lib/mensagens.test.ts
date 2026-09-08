@@ -55,4 +55,30 @@ describe("mensagens service", () => {
     expect(await listarMensagens(conversaA.id)).toHaveLength(1);
     expect(await listarMensagens(conversaB.id)).toHaveLength(1);
   });
+
+  it("com limite, retorna so as mensagens mais recentes em ordem cronologica", async () => {
+    const advogado = await makeAdvogado();
+    await createCliente(advogado.id, {
+      nome: "Maria Silva",
+      telefone: "+5511999990000",
+      cpf: "111.444.777-35",
+    });
+    const conversa = await prisma.conversa.create({
+      data: { telefone: "+5511999990000", ultimaMensagemEm: new Date() },
+    });
+
+    for (let i = 0; i < 25; i++) {
+      await adicionarMensagem(conversa.id, "cliente", `mensagem ${i}`);
+    }
+
+    const semLimite = await listarMensagens(conversa.id);
+    expect(semLimite).toHaveLength(25);
+
+    const comLimite = await listarMensagens(conversa.id, 20);
+    expect(comLimite).toHaveLength(20);
+    // As 20 mais recentes (mensagem 5..24), nao as 20 mais antigas, e ainda
+    // em ordem cronologica ascendente.
+    expect(comLimite[0].texto).toBe("mensagem 5");
+    expect(comLimite[comLimite.length - 1].texto).toBe("mensagem 24");
+  });
 });
