@@ -1,17 +1,23 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { obterTelefonePendente } from "@/lib/atendimento";
 import { ConfirmarForm } from "./confirmar-form";
 
 export default async function ConfirmarPage() {
   // O telefone nunca passa pela URL (query string apareceria em log de
-  // acesso/proxy reverso e no historico do navegador) - so existe aqui
-  // como um cookie httpOnly setado por identificarTelefoneAction depois de
-  // Turnstile + lookup por telefone OK. Essa pagina so precisa saber SE o
-  // cookie existe pra decidir o que renderizar; o valor em si nunca e
-  // passado pra ConfirmarForm (client component) - confirmarCpfAction lê o
-  // mesmo cookie direto no servidor quando o formulário é enviado.
+  // acesso/proxy reverso e no historico do navegador) e o cookie
+  // atendimento_pending_telefone nunca guarda o telefone em si - guarda um
+  // token opaco setado por identificarTelefoneAction depois de Turnstile +
+  // lookup por telefone OK (ver comentario la). Essa pagina resolve o token
+  // com a mesma obterTelefonePendente que confirmarCpfAction usa - so pra
+  // decidir o que renderizar (token ausente/invalido/expirado = sem
+  // confirmacao pendente = volta pro inicio do fluxo); o telefone resolvido
+  // nunca e passado pra ConfirmarForm (client component) - a action le o
+  // cookie e resolve de novo, direto no servidor, quando o formulario e
+  // enviado.
   const cookieStore = await cookies();
-  const telefone = cookieStore.get("atendimento_pending_telefone")?.value;
+  const pendingToken = cookieStore.get("atendimento_pending_telefone")?.value;
+  const telefone = pendingToken ? await obterTelefonePendente(pendingToken) : null;
   if (!telefone) redirect("/atendimento");
 
   return (
