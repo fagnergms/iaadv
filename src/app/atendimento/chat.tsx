@@ -11,6 +11,13 @@ export function Chat({ mensagensIniciais }: { mensagensIniciais: MensagemChat[] 
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
+    // So limpa o campo em caso de sucesso genuino: nao pendente E sem erro.
+    // Antes desta correcao, o efeito rodava a cada mudanca de `state`
+    // (inclusive quando `state.error` estava preenchido apos uma falha),
+    // mas so checava `pending` - entao um retorno com erro tambem limpava o
+    // formulario, apagando o texto que o cliente acabou de digitar bem no
+    // momento em que ele mais precisaria dele pra tentar de novo ou pra ler
+    // o que tinha escrito.
     if (!pending && !state?.error) {
       formRef.current?.reset();
     }
