@@ -31,7 +31,20 @@ export async function identificarTelefoneAction(
   // trivialmente contornavel por quem faz POST direto pra esta action sem
   // carregar o JS da pagina; validar aqui garante que nenhum lookup no
   // banco roda pra uma requisicao que nao passou pelo desafio.
-  const turnstileOk = await verificarTurnstile(turnstileToken);
+  let turnstileOk: boolean;
+  try {
+    turnstileOk = await verificarTurnstile(turnstileToken);
+  } catch {
+    // verificarTurnstile faz um fetch pro endpoint de siteverify da
+    // Cloudflare - instabilidade de rede ou uma indisponibilidade momentanea
+    // do lado deles nao pode derrubar a Server Action inteira com uma
+    // excecao nao tratada. Trata como falha de verificacao (fail-closed: sem
+    // confirmar o desafio, nao ha lookup por telefone), com a mesma mensagem
+    // nao-tecnica do caso de token invalido.
+    return {
+      error: "Não foi possível confirmar que você não é um robô. Tente novamente.",
+    };
+  }
   if (!turnstileOk) {
     return {
       error: "Não foi possível confirmar que você não é um robô. Tente novamente.",
@@ -164,14 +177,43 @@ export async function enviarMensagemAction(
   const texto = String(formData.get("texto") ?? "").trim();
   if (!texto) return { error: "Digite uma mensagem." };
 
+  // A mensagem do cliente e persistida antes de qualquer chamada externa
+  // (Gemini). Isso garante que o texto que o usuario digitou nunca se perde
+  // silenciosamente: mesmo que a IA falhe logo em seguida (ver catch
+  // abaixo), a mensagem do cliente ja esta gravada e visivel no historico -
+  // nao depende de a chamada externa ter sucesso.
   await adicionarMensagem(sessao.conversa.id, "cliente", texto);
 
   const historicoAnterior = await listarMensagens(sessao.conversa.id);
-  const resposta = await responderComIA(
-    sessao.cliente.id,
-    historicoAnterior.map((m) => ({ remetente: m.remetente, texto: m.texto })),
-    texto
-  );
+
+  let resposta;
+  try {
+    resposta = await responderComIA(
+      sessao.cliente.id,
+      historicoAnterior.map((m) => ({ remetente: m.remetente, texto: m.texto })),
+      texto
+    );
+  } catch {
+    // Gemini pode falhar por motivos fora do nosso controle (limite de 15
+    // RPM do tier gratuito, instabilidade de rede, bloqueio por filtro de
+    // seguranca, etc.). Sem este catch, a excecao suberia sem tratamento e a
+    // Server Action inteira falharia - a mensagem do cliente ja gravada
+    // acima ficaria "pendurada" sem nenhuma resposta visivel, e o form no
+    // cliente perderia o texto digitado (useEffect de reset em chat.tsx).
+    // Gravamos uma mensagem de fallback do bot pra manter a conversa
+    // coerente (o cliente ve que a mensagem chegou, so nao foi possivel
+    // processar ainda) e retornamos um erro nao-tecnico em portugues, no
+    // mesmo padrao das demais mensagens de erro deste arquivo.
+    await adicionarMensagem(
+      sessao.conversa.id,
+      "bot",
+      "Não consegui processar sua mensagem agora, tente novamente em instantes."
+    );
+    revalidatePath("/atendimento");
+    return {
+      error: "Não consegui processar sua mensagem agora, tente novamente em instantes.",
+    };
+  }
 
   await adicionarMensagem(sessao.conversa.id, "bot", resposta.texto);
 
