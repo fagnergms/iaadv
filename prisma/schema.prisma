@@ -98,6 +98,7 @@ model MensagemChat {
   texto      String
   criadoEm   DateTime          @default(now()) @map("criado_em")
 
+  @@index([conversaId])
   @@map("mensagens_chat")
 }
 
