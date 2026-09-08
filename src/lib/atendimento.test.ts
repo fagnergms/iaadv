@@ -139,4 +139,77 @@ describe("atendimento service", () => {
     const posBloqueio = await confirmarCpf(clienteInput.telefone, "7735");
     expect(posBloqueio.status).toBe("bloqueado");
   });
+
+  it("um chute correto dentro de um lote concorrente que estoura o limite continua bloqueado (nao reseta tentativas nem emite token)", async () => {
+    const advogado = await makeAdvogado();
+    const cliente = await createCliente(advogado.id, clienteInput);
+
+    // Simula um brute-force paralelo real: um lote de tentativas erradas E o
+    // chute certo disparados juntos, sem esperar resposta entre eles (só
+    // 10.000 sufixos de CPF possíveis — um atacante real mandaria todos de
+    // uma vez). O chute certo fica no meio do lote.
+    //
+    // Antes da correção deste bug, o write de sucesso era incondicional: se
+    // o gate de bloqueio no topo da função (lido uma única vez, no início)
+    // já tivesse sido lido por TODAS as chamadas do lote antes de qualquer
+    // escrita comitar — o que é exatamente o que uma rajada concorrente real
+    // tende a fazer —, nenhuma delas seria barrada por ele, e o write
+    // incondicional do caminho de sucesso resetaria tentativasFalhas e
+    // emitiria um sessionToken válido mesmo com o lote já tendo estourado o
+    // limite de 3 erros.
+    //
+    // Usamos um lote grande (50 chutes errados + 1 certo) de propósito: com
+    // poucos concorrentes, qual das requisições o Postgres serializa
+    // primeiro é genuinamente aleatório — se o chute certo calhar de ser
+    // processado entre as 3 primeiras operações da rajada, ele legitimamente
+    // consome uma das 3 tentativas permitidas e É PARA suceder (isso não é
+    // bug; é o mesmo resultado que teríamos se, por azar, a 1ª, 2ª ou 3ª
+    // tentativa sequencial de verdade fosse a certa). O que a correção
+    // garante é que a PROBABILIDADE disso passe de "sempre, garantido" (bug)
+    // para, na prática, "no máximo ~3 em N" — do tamanho do próprio limite
+    // de tentativas, e não da rajada inteira. Com N=50 essa chance já é
+    // pequena o bastante pra nunca ter sido observada em dezenas de
+    // execuções deste teste durante o desenvolvimento (ver relatório da
+    // tarefa); ainda assim, se um dia flacar, é esse tradeoff estatístico —
+    // e não uma regressão da correção — a primeira coisa a checar.
+    const N_ERRADAS = 50;
+    const INDICE_CERTO = 25;
+    const chamadas = Array.from({ length: N_ERRADAS + 1 }, (_, i) =>
+      i === INDICE_CERTO
+        ? confirmarCpf(clienteInput.telefone, "7735")
+        : confirmarCpf(clienteInput.telefone, "0000")
+    );
+    const resultados = await Promise.all(chamadas);
+    const resultadoChuteCerto = resultados[INDICE_CERTO];
+
+    // O chute certo NÃO pode ter sido confirmado: o write que reseta
+    // tentativasFalhas e emite o sessionToken agora é condicional
+    // (updateMany com tentativasFalhas < 3), avaliado no momento exato do
+    // write, não numa leitura antiga do início da função.
+    expect(resultadoChuteCerto.status).toBe("bloqueado");
+    if (resultadoChuteCerto.status === "confirmado") {
+      throw new Error(
+        "chute correto dentro do lote bloqueado não deveria retornar sessionToken"
+      );
+    }
+
+    const conversa = await prisma.conversa.findUnique({
+      where: { telefone: clienteInput.telefone },
+    });
+    // A conta continua travada: nunca foi verificada e nenhum token foi
+    // gravado, mesmo que o chute certo tenha "passado" pelo gate do topo.
+    expect(conversa?.verificadoEm).toBeNull();
+    expect(conversa?.sessionToken).toBeNull();
+    expect(conversa?.tentativasFalhas).toBeGreaterThanOrEqual(3);
+
+    // Exatamente um escalonamento, mesmo com o chute certo misturado no lote.
+    const escalonamentos = await prisma.escalonamento.findMany({
+      where: { clienteId: cliente.id },
+    });
+    expect(escalonamentos).toHaveLength(1);
+
+    // E uma tentativa isolada e correta, depois do lote, continua bloqueada.
+    const tentativaIsolada = await confirmarCpf(clienteInput.telefone, "7735");
+    expect(tentativaIsolada.status).toBe("bloqueado");
+  });
 });
