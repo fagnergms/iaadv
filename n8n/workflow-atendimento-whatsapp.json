@@ -179,7 +179,7 @@
           "conditions": [
             {
               "id": "cond-sessao-valida",
-              "leftValue": "={{ $json.sessaoValida }}",
+              "leftValue": "={{ $('Calcular Sessao').first().json.sessaoValida }}",
               "rightValue": true,
               "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
@@ -196,7 +196,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json;\nconst digitosRecebidos = (item.texto || \"\").replace(/\\D/g, \"\").slice(-4);\nconst digitosEsperados = (item.clienteCpf || \"\").replace(/\\D/g, \"\").slice(-4);\n\nif (!item.conversaExiste) {\n  return [{\n    json: {\n      ...item,\n      acao: \"pedir_cpf\",\n      mensagem: \"Para sua seguranca, confirme os 4 ultimos digitos do seu CPF antes de continuarmos.\",\n      novoVerificadoEm: null,\n      novasTentativas: 0,\n      motivoEscalonamento: null\n    }\n  }];\n}\n\nconst confirmou = digitosRecebidos.length === 4 && digitosRecebidos === digitosEsperados;\n\nif (confirmou) {\n  return [{\n    json: {\n      ...item,\n      acao: \"confirmado\",\n      mensagem: \"Identidade confirmada! Pode repetir sua pergunta.\",\n      novoVerificadoEm: new Date().toISOString(),\n      novasTentativas: 0,\n      motivoEscalonamento: null\n    }\n  }];\n}\n\nconst novasTentativas = (item.tentativasFalhas || 0) + 1;\n\nif (novasTentativas >= 3) {\n  return [{\n    json: {\n      ...item,\n      acao: \"escalar_falha\",\n      mensagem: \"Nao conseguimos confirmar sua identidade. Um advogado vai entrar em contato.\",\n      motivoEscalonamento: \"falha na verificacao\",\n      novoVerificadoEm: null,\n      novasTentativas\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...item,\n    acao: \"tentar_de_novo\",\n    mensagem: \"Nao conferiu. Pode confirmar novamente os 4 ultimos digitos do seu CPF?\",\n    novoVerificadoEm: null,\n    novasTentativas,\n    motivoEscalonamento: null\n  }\n}];"
+        "jsCode": "// $input.first() aqui seria o item que saiu do node \"Upsert Conversa\"\n// (Postgres), que substitui o conteudo do item pelo retorno da query - por\n// isso os dados de \"Calcular Sessao\" (telefone, texto, clienteCpf, etc.)\n// precisam ser buscados explicitamente pelo nome do node, nao por $input.\nconst item = $('Calcular Sessao').first().json;\nconst digitosRecebidos = (item.texto || \"\").replace(/\\D/g, \"\").slice(-4);\nconst digitosEsperados = (item.clienteCpf || \"\").replace(/\\D/g, \"\").slice(-4);\n\nif (!item.conversaExiste) {\n  return [{\n    json: {\n      ...item,\n      acao: \"pedir_cpf\",\n      mensagem: \"Para sua seguranca, confirme os 4 ultimos digitos do seu CPF antes de continuarmos.\",\n      novoVerificadoEm: null,\n      novasTentativas: 0,\n      motivoEscalonamento: null\n    }\n  }];\n}\n\nconst confirmou = digitosRecebidos.length === 4 && digitosRecebidos === digitosEsperados;\n\nif (confirmou) {\n  return [{\n    json: {\n      ...item,\n      acao: \"confirmado\",\n      mensagem: \"Identidade confirmada! Pode repetir sua pergunta.\",\n      novoVerificadoEm: new Date().toISOString(),\n      novasTentativas: 0,\n      motivoEscalonamento: null\n    }\n  }];\n}\n\nconst novasTentativas = (item.tentativasFalhas || 0) + 1;\n\nif (novasTentativas >= 3) {\n  return [{\n    json: {\n      ...item,\n      acao: \"escalar_falha\",\n      mensagem: \"Nao conseguimos confirmar sua identidade. Um advogado vai entrar em contato.\",\n      motivoEscalonamento: \"falha na verificacao\",\n      novoVerificadoEm: null,\n      novasTentativas\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...item,\n    acao: \"tentar_de_novo\",\n    mensagem: \"Nao conferiu. Pode confirmar novamente os 4 ultimos digitos do seu CPF?\",\n    novoVerificadoEm: null,\n    novasTentativas,\n    motivoEscalonamento: null\n  }\n}];"
       },
       "id": "code-verificar-cpf",
       "name": "Verificar CPF",
@@ -231,7 +231,7 @@
           "conditions": [
             {
               "id": "cond-escalar-falha",
-              "leftValue": "={{ $json.acao }}",
+              "leftValue": "={{ $('Verificar CPF').first().json.acao }}",
               "rightValue": "escalar_falha",
               "operator": { "type": "string", "operation": "equals" }
             }
@@ -251,7 +251,7 @@
         "operation": "executeQuery",
         "query": "INSERT INTO escalonamentos (id, cliente_id, advogado_id, telefone, mensagem_cliente, motivo, criado_em)\nVALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now())",
         "options": {
-          "queryReplacement": "={{ [$json.clienteId, $json.advogadoId, $json.telefone, $json.texto, $json.motivoEscalonamento] }}"
+          "queryReplacement": "={{ [$('Verificar CPF').first().json.clienteId, $('Verificar CPF').first().json.advogadoId, $('Verificar CPF').first().json.telefone, $('Verificar CPF').first().json.texto, $('Verificar CPF').first().json.motivoEscalonamento] }}"
         }
       },
       "id": "pg-escalonamento-falha",
@@ -276,7 +276,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ number: $json.telefone.replace(\"+\", \"\"), text: $json.mensagem }) }}",
+        "jsonBody": "={{ JSON.stringify({ number: $('Verificar CPF').first().json.telefone.replace(\"+\", \"\"), text: $('Verificar CPF').first().json.mensagem }) }}",
         "options": {}
       },
       "id": "http-verificacao",
@@ -288,7 +288,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "={{ $json.texto }}",
+        "text": "={{ $('Calcular Sessao').first().json.texto }}",
         "options": {
           "systemMessage": "Voce e um assistente de um escritorio de advocacia, respondendo pelo WhatsApp a clientes que perguntam sobre o andamento de seus processos.\n\nRegras rigidas:\n- Responda SOMENTE com base no que a ferramenta \"Buscar Processos (Tool)\" retornar. Nunca invente numero de processo, status, prazo ou qualquer informacao juridica.\n- Se o cliente tiver mais de um processo, pergunte qual processo antes de responder sobre status.\n- Se a pergunta nao for sobre status de processo, se a ferramenta nao retornar nada relevante, ou se o cliente pedir explicitamente para falar com um advogado, termine sua resposta com a tag [ESCALAR] em uma linha separada, seguida do motivo em poucas palavras. Nao tente adivinhar informacao juridica.\n- Seja breve e educado, em portugues do Brasil."
         }
@@ -398,7 +398,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ number: $json.telefone.replace(\"+\", \"\"), text: $json.mensagem }) }}",
+        "jsonBody": "={{ JSON.stringify({ number: $('Processar Resposta IA').first().json.telefone.replace(\"+\", \"\"), text: $('Processar Resposta IA').first().json.mensagem }) }}",
         "options": {}
       },
       "id": "http-ia",
