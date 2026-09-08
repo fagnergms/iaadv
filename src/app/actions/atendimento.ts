@@ -177,6 +177,14 @@ export async function enviarMensagemAction(
   const texto = String(formData.get("texto") ?? "").trim();
   if (!texto) return { error: "Digite uma mensagem." };
 
+  // O historico e lido ANTES de persistir a nova mensagem do cliente, pra
+  // que `historico` nunca inclua a propria mensagem que sera passada como
+  // `novaMensagem` pra responderComIA - se lessemos depois de persistir (com
+  // adicionarMensagem chamado primeiro), a mensagem que acabou de ser
+  // gravada apareceria duas vezes no contexto da IA: uma dentro de
+  // `historico` e outra como `novaMensagem`.
+  const historico = await listarMensagens(sessao.conversa.id);
+
   // A mensagem do cliente e persistida antes de qualquer chamada externa
   // (Gemini). Isso garante que o texto que o usuario digitou nunca se perde
   // silenciosamente: mesmo que a IA falhe logo em seguida (ver catch
@@ -184,13 +192,11 @@ export async function enviarMensagemAction(
   // nao depende de a chamada externa ter sucesso.
   await adicionarMensagem(sessao.conversa.id, "cliente", texto);
 
-  const historicoAnterior = await listarMensagens(sessao.conversa.id);
-
   let resposta;
   try {
     resposta = await responderComIA(
       sessao.cliente.id,
-      historicoAnterior.map((m) => ({ remetente: m.remetente, texto: m.texto })),
+      historico.map((m) => ({ remetente: m.remetente, texto: m.texto })),
       texto
     );
   } catch {
