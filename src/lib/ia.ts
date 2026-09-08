@@ -56,7 +56,7 @@ export async function responderComIA(
 ): Promise<RespostaIA> {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   const model = genAI.getGenerativeModel({
-    model: "gemini-3.6-flash",
+    model: "gemini-flash-lite-latest",
     systemInstruction: SYSTEM_PROMPT,
     tools: [buscarProcessosTool],
   });
