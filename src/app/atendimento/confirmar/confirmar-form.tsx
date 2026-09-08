@@ -5,9 +5,8 @@ import { confirmarCpfAction } from "@/app/actions/atendimento";
 import { inputClass } from "@/components/ui/Field";
 import { buttonClass } from "@/components/ui/button-styles";
 
-export function ConfirmarForm({ telefone }: { telefone: string }) {
-  const action = confirmarCpfAction.bind(null, telefone);
-  const [state, formAction, pending] = useActionState(action, {});
+export function ConfirmarForm() {
+  const [state, formAction, pending] = useActionState(confirmarCpfAction, {});
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
