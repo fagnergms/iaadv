@@ -2,12 +2,82 @@ import crypto from "crypto";
 import { prisma } from "./db";
 
 const SESSAO_VALIDADE_MS = 24 * 60 * 60 * 1000;
+const PENDING_TOKEN_VALIDADE_MS = 10 * 60 * 1000;
 const MAX_TENTATIVAS = 3;
 
 export async function buscarClientePorTelefone(telefone: string) {
   return prisma.cliente.findUnique({
     where: { telefone },
     select: { id: true, nome: true, cpf: true, advogadoId: true },
+  });
+}
+
+// Gera um token opaco e imprevisível (mesmo crypto.randomBytes(32) usado pro
+// sessionToken abaixo) e o persiste em Conversa.pendingToken - nunca o
+// telefone em si. Isso é o que torna o cookie pendente (setado por
+// identificarTelefoneAction depois que Turnstile + o lookup por telefone já
+// passaram) inútil pra quem não passou por essas duas checagens: um
+// script/curl pode forjar um header `Cookie: atendimento_pending_telefone=
+// <qualquer coisa>` à vontade (httpOnly só impede leitura via JS no
+// navegador, não impede um cliente não-navegador de setar o valor que
+// quiser), mas só um valor que bata com um pendingToken gravado nesta
+// função - ou seja, gerado depois de uma passagem real por Turnstile - tem
+// utilidade. Sem essa correspondência, obterTelefonePendente (abaixo) não
+// resolve telefone nenhum. Não mexe em tentativasFalhas no branch de update
+// (mesma disciplina do upsert em confirmarCpf) pra não resetar o contador de
+// bloqueio só por reidentificar.
+export async function iniciarConfirmacaoCpf(telefone: string): Promise<string> {
+  const pendingToken = crypto.randomBytes(32).toString("hex");
+  const pendingTokenExpiraEm = new Date(Date.now() + PENDING_TOKEN_VALIDADE_MS);
+
+  await prisma.conversa.upsert({
+    where: { telefone },
+    create: {
+      telefone,
+      tentativasFalhas: 0,
+      ultimaMensagemEm: new Date(),
+      pendingToken,
+      pendingTokenExpiraEm,
+    },
+    update: {
+      ultimaMensagemEm: new Date(),
+      pendingToken,
+      pendingTokenExpiraEm,
+    },
+  });
+
+  return pendingToken;
+}
+
+// Resolve telefone a partir do pendingToken opaco - nunca o contrário. Só
+// retorna algo se existir uma Conversa cujo pendingToken bata exatamente com
+// o valor recebido (gerado exclusivamente por iniciarConfirmacaoCpf) e ainda
+// dentro da validade de 10 minutos. Token ausente/errado/expirado retorna
+// null igual, sem distinguir qual dos três casos - quem chama trata todos
+// como "sem confirmação pendente" e redireciona de volta pro início do
+// fluxo.
+export async function obterTelefonePendente(
+  pendingToken: string
+): Promise<string | null> {
+  const conversa = await prisma.conversa.findUnique({ where: { pendingToken } });
+  if (!conversa || !conversa.pendingTokenExpiraEm) return null;
+
+  const tokenValido = Date.now() < conversa.pendingTokenExpiraEm.getTime();
+  if (!tokenValido) return null;
+
+  return conversa.telefone;
+}
+
+// Invalida o pendingToken depois que ele já cumpriu seu papel (virou uma
+// sessão verificada de verdade, com sessionToken). Não é estritamente
+// necessário pra segurança - o token já expira sozinho em 10 minutos, e
+// tentar reusá-lo só levaria de volta pro mesmo fluxo de confirmarCpf com o
+// mesmo telefone - mas evita deixar um token válido "sobrando" depois que a
+// sessão real já existe.
+export async function invalidarConfirmacaoPendente(telefone: string): Promise<void> {
+  await prisma.conversa.update({
+    where: { telefone },
+    data: { pendingToken: null, pendingTokenExpiraEm: null },
   });
 }
 
