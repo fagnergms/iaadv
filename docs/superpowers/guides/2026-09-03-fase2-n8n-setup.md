@@ -141,7 +141,7 @@ evento `messages.upsert`) é:
       "messageType": "conversation",
       "messageTimestamp": 1234567890
     },
-    "sender": "5511999999999@s.whatsapp.net",
+    "sender": "5511888880000@s.whatsapp.net",
     "server_url": "https://evo.paineldev.space",
     "apikey": "..."
   },
@@ -150,11 +150,19 @@ evento `messages.upsert`) é:
 }
 ```
 
-Repare em `"addressingMode": "lid"` — quando presente, o WhatsApp está
-enviando um identificador de privacidade ("Linked ID") em
-`data.key.remoteJid`, **não o telefone real**. O campo `body.sender` (no
-nível de cima, ao lado de `server_url`/`apikey`) é o que a própria
-Evolution já resolve como o número de verdade — é esse que o node 4.3 usa.
+**Cuidado com dois campos que parecem candidatos óbvios a "o telefone do
+cliente" e não são — isso foi testado errado uma vez em produção antes de
+acertar:**
+- `body.sender` (ao lado de `server_url`/`apikey`) é o número da **própria
+  instância** (o WhatsApp do escritório), não o do cliente — só é útil se
+  você tiver várias instâncias conectadas e precisar saber por qual delas
+  a mensagem chegou. Usar esse campo faz o bot mandar a resposta pra si
+  mesmo.
+- `data.key.remoteJid` **é** o número do cliente, mesmo quando
+  `addressingMode` vem como `"lid"` — esse campo só descreve como o
+  WhatsApp resolveu o identificador internamente, não invalida o valor.
+
+O node 4.3 usa `data.key.remoteJid`.
 
 ### 4.2 — IF: ignorar mensagens próprias e não-texto
 
@@ -183,8 +191,7 @@ if (!texto) {
   return [];
 }
 
-const numeroBruto = body.sender || data.key.remoteJid;
-const telefone = "+" + numeroBruto.split("@")[0];
+const telefone = "+" + data.key.remoteJid.split("@")[0];
 
 return [{ json: { telefone, texto } }];
 ```
@@ -384,21 +391,29 @@ exatamente a garantia que o painel depende para isolar advogados entre si.
   do cliente para "qual processo" também vai passar pela IA de novo — isso
   funciona bem na maioria dos casos mas não foi pensado como uma máquina de
   estados rígida feito a verificação de CPF (que é código puro, não IA).
-- O payload do webhook (4.1) e o node "Extrair e Filtrar" (4.3) já foram
-  confirmados contra uma execução real em produção (Evolution API v2) —
-  incluindo a pegadinha do `.body` aninhado e do `addressingMode: "lid"`
-  substituindo o telefone real por um identificador de privacidade em
-  `data.key.remoteJid` (por isso o código usa `body.sender`). Os
-  **endpoints de envio de mensagem** (4.9, `POST
-  /message/sendText/<instancia>`) ainda não foram testados end-to-end —
-  se a resposta do bot não chegar no WhatsApp do cliente, confira o
-  formato exato desse endpoint na sua versão antes de suspeitar de outra
-  coisa.
+- O fluxo completo do caminho "cliente não encontrado" (4.1 a 4.5 e 4.9) já
+  foi testado ponta a ponta contra uma instância real da Evolution API e
+  corrigido nos pontos que quebraram:
+  - O payload chega embrulhado em `.body` (4.1), não direto no item.
+  - `body.sender` é o número da **própria instância**, não o do cliente —
+    foi tentado nessa função e causava o bot mandar mensagem pra si mesmo;
+    o campo certo é sempre `data.key.remoteJid` (4.1/4.3), mesmo com
+    `addressingMode: "lid"`.
+  - Dentro dos Code nodes, referenciar outro node por nome com `.item`
+    (ex: `$('Extrair e Filtrar').item`) falha quando esse node anterior
+    devolveu um item "vazio" sintético (ex: Postgres sem linha encontrada,
+    com `alwaysOutputData: true`) — o pareamento automático quebra. Use
+    `.first()` em vez de `.item` nesses casos (já corrigido no arquivo).
+  - A URL pública da Evolution API é só o domínio, **sem** a porta interna
+    (`https://evo.paineldev.space`, não `:8080` — essa porta aparece no
+    Coolify como referência interna do container, não faz parte da URL
+    externa).
+  - Os caminhos de **verificação de CPF e da IA** (4.6 a 4.8, 4.10) ainda
+    não foram testados ponta a ponta — se travar em algo por ali, mande a
+    execução completa (JSON) antes de tentar adivinhar a causa.
 - O arquivo `n8n/workflow-atendimento-whatsapp.json` foi escrito
-  manualmente com base no formato de exportação do n8n. O node "Extrair e
-  Filtrar" já foi corrigido contra uma execução real (ver acima); o resto
-  dos nodes clássicos (Webhook, IF, Postgres, Code, HTTP Request) segue
-  sendo o desenho original, ainda não testado ponta a ponta; os três nodes
-  de IA (AI Agent, modelo do Gemini, tool de Postgres) são a parte do n8n
-  que mais muda de formato entre versões e os mais prováveis de precisar
-  de ajuste manual.
+  manualmente com base no formato de exportação do n8n. O caminho
+  "cliente não encontrado" já foi corrigido contra execuções reais (ver
+  acima); os três nodes de IA (AI Agent, modelo do Gemini, tool de
+  Postgres) são a parte do n8n que mais muda de formato entre versões e
+  os mais prováveis de precisar de ajuste manual quando você chegar lá.
