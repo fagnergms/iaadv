@@ -44,19 +44,19 @@ enum SituacaoProcesso {
 }
 
 model Processo {
-  id             String            @id @default(uuid())
-  clienteId      String            @map("cliente_id")
-  cliente        Cliente           @relation(fields: [clienteId], references: [id])
-  advogadoId     String            @map("advogado_id")
-  advogado       Advogado          @relation(fields: [advogadoId], references: [id])
-  numeroProcesso String            @map("numero_processo")
+  id             String           @id @default(uuid())
+  clienteId      String           @map("cliente_id")
+  cliente        Cliente          @relation(fields: [clienteId], references: [id])
+  advogadoId     String           @map("advogado_id")
+  advogado       Advogado         @relation(fields: [advogadoId], references: [id])
+  numeroProcesso String           @map("numero_processo")
   descricao      String
-  statusAtual    String            @map("status_atual")
-  situacao       SituacaoProcesso  @default(ativo)
-  criadoEm       DateTime          @default(now()) @map("criado_em")
-  atualizadoEm   DateTime          @updatedAt @map("atualizado_em")
+  statusAtual    String           @map("status_atual")
+  situacao       SituacaoProcesso @default(ativo)
+  criadoEm       DateTime         @default(now()) @map("criado_em")
+  atualizadoEm   DateTime         @updatedAt @map("atualizado_em")
 
-  historico      HistoricoStatus[]
+  historico HistoricoStatus[]
 
   @@map("processos")
 }
@@ -72,15 +72,17 @@ model HistoricoStatus {
 }
 
 model Conversa {
-  id               String    @id @default(uuid())
-  telefone         String    @unique
-  verificadoEm     DateTime? @map("verificado_em")
-  tentativasFalhas Int       @default(0) @map("tentativas_falhas")
-  ultimaMensagemEm DateTime  @map("ultima_mensagem_em")
-  criadoEm         DateTime  @default(now()) @map("criado_em")
-  sessionToken     String?   @unique @map("session_token")
+  id                   String    @id @default(uuid())
+  telefone             String    @unique
+  verificadoEm         DateTime? @map("verificado_em")
+  tentativasFalhas     Int       @default(0) @map("tentativas_falhas")
+  ultimaMensagemEm     DateTime  @map("ultima_mensagem_em")
+  criadoEm             DateTime  @default(now()) @map("criado_em")
+  sessionToken         String?   @unique @map("session_token")
+  pendingToken         String?   @unique @map("pending_token")
+  pendingTokenExpiraEm DateTime? @map("pending_token_expira_em")
 
-  mensagens        MensagemChat[]
+  mensagens MensagemChat[]
 
   @@map("conversas")
 }
