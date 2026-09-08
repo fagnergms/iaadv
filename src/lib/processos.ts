@@ -43,6 +43,17 @@ export async function listProcessosByCliente(advogadoId: string, clienteId: stri
   });
 }
 
+// Usado pelo chat web (/atendimento): o chamador já é a sessão verificada
+// do próprio cliente (clienteId resolvido a partir do sessionToken em
+// obterConversaValida), não um advogado — por isso, ao contrário das
+// demais funções deste arquivo, não recebe nem valida advogadoId.
+export async function listProcessosDoCliente(clienteId: string) {
+  return prisma.processo.findMany({
+    where: { clienteId },
+    orderBy: { criadoEm: "desc" },
+  });
+}
+
 export async function getProcessoForAdvogado(advogadoId: string, processoId: string) {
   return prisma.processo.findFirst({ where: { id: processoId, advogadoId } });
 }
