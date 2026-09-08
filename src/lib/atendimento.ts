@@ -85,9 +85,20 @@ export async function confirmarCpf(
     };
   }
 
+  // O acerto também precisa de um write condicional, pelo mesmo motivo do
+  // incremento acima: o `conversaAtual` lido no topo da função pode estar
+  // desatualizado quando chegamos aqui (ex.: um lote de tentativas erradas
+  // concorrentes pode ter cruzado o limite depois daquele read, mas antes
+  // deste write). Sem uma condição aqui, um acerto cujo "chute" fazia parte
+  // de um brute-force paralelo destravaria a conta mesmo já bloqueada — um
+  // write incondicional resetaria tentativasFalhas e emitiria um
+  // sessionToken válido, anulando o limite de 3 tentativas. Por isso o
+  // reset+token só é gravado se, no momento exato deste UPDATE, a linha
+  // ainda estiver com tentativasFalhas < MAX_TENTATIVAS (mesma serialização
+  // por linha do Postgres que torna o incremento acima atômico).
   const sessionToken = crypto.randomBytes(32).toString("hex");
-  const conversa = await prisma.conversa.update({
-    where: { telefone },
+  const resultado = await prisma.conversa.updateMany({
+    where: { telefone, tentativasFalhas: { lt: MAX_TENTATIVAS } },
     data: {
       verificadoEm: new Date(),
       tentativasFalhas: 0,
@@ -95,6 +106,13 @@ export async function confirmarCpf(
       sessionToken,
     },
   });
+
+  if (resultado.count === 0) {
+    // Alguém já bloqueou a conta entre o read do topo e este write.
+    return { status: "bloqueado" };
+  }
+
+  const conversa = await prisma.conversa.findUniqueOrThrow({ where: { telefone } });
 
   return {
     status: "confirmado",
