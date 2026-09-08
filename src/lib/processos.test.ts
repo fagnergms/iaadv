@@ -5,6 +5,7 @@ import { createCliente } from "./clientes";
 import {
   createProcesso,
   listProcessosByCliente,
+  listProcessosDoCliente,
   getProcessoForAdvogado,
   updateProcesso,
   ClienteNaoEncontradoError,
@@ -109,5 +110,29 @@ describe("processos service", () => {
       situacao: "encerrado",
     });
     expect(updated?.situacao).toBe("encerrado");
+  });
+
+  it("listProcessosDoCliente retorna os processos do cliente sem exigir advogadoId", async () => {
+    const advogado = await makeAdvogado();
+    const cliente = await createCliente(advogado.id, clienteInput);
+    await createProcesso(advogado.id, cliente.id, processoInput);
+
+    const processos = await listProcessosDoCliente(cliente.id);
+    expect(processos).toHaveLength(1);
+    expect(processos[0].clienteId).toBe(cliente.id);
+  });
+
+  it("listProcessosDoCliente nao vaza processos de outro cliente", async () => {
+    const advogado = await makeAdvogado();
+    const clienteA = await createCliente(advogado.id, clienteInput);
+    const clienteB = await createCliente(advogado.id, {
+      nome: "Joao Souza",
+      telefone: "+5511999990001",
+      cpf: "111.444.777-35",
+    });
+    await createProcesso(advogado.id, clienteA.id, processoInput);
+
+    const processosDeB = await listProcessosDoCliente(clienteB.id);
+    expect(processosDeB).toHaveLength(0);
   });
 });
