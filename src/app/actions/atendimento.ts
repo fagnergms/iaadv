@@ -183,7 +183,11 @@ export async function enviarMensagemAction(
   // adicionarMensagem chamado primeiro), a mensagem que acabou de ser
   // gravada apareceria duas vezes no contexto da IA: uma dentro de
   // `historico` e outra como `novaMensagem`.
-  const historico = await listarMensagens(sessao.conversa.id);
+  // Limita a `historico` as ultimas 20 mensagens (ver comentario em
+  // listarMensagens) - cobre confortavelmente uma troca de varios turnos
+  // (ex.: "qual processo?" / "o segundo" / pergunta de fato) sem reenviar a
+  // conversa inteira pro Gemini a cada mensagem nova.
+  const historico = await listarMensagens(sessao.conversa.id, 20);
 
   // A mensagem do cliente e persistida antes de qualquer chamada externa
   // (Gemini). Isso garante que o texto que o usuario digitou nunca se perde
