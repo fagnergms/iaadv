@@ -193,7 +193,20 @@ if (!texto) {
 
 const telefone = "+" + data.key.remoteJid.split("@")[0];
 
-return [{ json: { telefone, texto } }];
+// Celular brasileiro pode chegar com ou sem o 9o digito depois do DDD - o
+// WhatsApp nao e consistente nisso, e o advogado pode ter cadastrado o
+// cliente na outra forma (confirmado em producao: cadastro com o 9,
+// mensagem chegando sem). Gera a variante alternativa pra buscar por
+// qualquer uma das duas no node seguinte.
+let telefoneVariante = telefone;
+const match = telefone.match(/^\+55(\d{2})(\d{8,9})$/);
+if (match) {
+  const [, ddd, numero] = match;
+  telefoneVariante =
+    numero.length === 9 ? `+55${ddd}${numero.slice(1)}` : `+55${ddd}9${numero}`;
+}
+
+return [{ json: { telefone, telefoneVariante, texto } }];
 ```
 
 `telefone` precisa ficar exatamente no mesmo formato E.164 que está
@@ -202,12 +215,22 @@ número real e bateu — se ainda assim os números vierem diferentes do
 esperado no seu caso (ex: DDD com formatação diferente), ajuste esse
 `split("@")[0]` conforme o que você vir na execução.
 
+**Limitação conhecida:** essa variante só resolve a busca do cliente
+(4.4). Se o mesmo cliente mandar mensagens em dias diferentes e o
+WhatsApp reportar o número ora com o 9, ora sem, cada forma gera uma
+linha própria em `conversas` — na prática, isso pode fazer o bot pedir
+confirmação de CPF de novo mesmo já tendo verificado antes (não deixa de
+reconhecer o cliente, só reverifica). Se isso incomodar na prática, o
+próximo passo seria usar sempre o telefone canônico do cadastro (o que
+`clientes.telefone` já tem) para as operações em `conversas` a partir
+daqui, em vez do número bruto da mensagem — ainda não implementado.
+
 ### 4.4 — Postgres: buscar cliente pelo telefone
 
 ```sql
 SELECT id, nome, cpf, advogado_id
 FROM clientes
-WHERE telefone = '{{ $json.telefone }}'
+WHERE telefone = '{{ $json.telefone }}' OR telefone = '{{ $json.telefoneVariante }}'
 ```
 
 ### 4.5 — IF: cliente encontrado?
